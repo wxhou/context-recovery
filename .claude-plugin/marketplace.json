@@ -1,0 +1,21 @@
+{
+  "name": "wxhou-context-recovery",
+  "owner": {
+    "name": "wxhou"
+  },
+  "plugins": [
+    {
+      "name": "context-recovery",
+      "source": "./",
+      "description": "PreCompact backup + SessionStart recovery — prevents context amnesia during Claude Code auto-compaction.",
+      "version": "0.1.1",
+      "author": {
+        "name": "wxhou"
+      },
+      "homepage": "https://github.com/wxhou/context-recovery",
+      "repository": "https://github.com/wxhou/context-recovery",
+      "license": "MIT",
+      "category": "productivity"
+    }
+  ]
+}

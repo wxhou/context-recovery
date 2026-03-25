@@ -8,8 +8,14 @@ ContextRecoveryHook prevents **context amnesia** during Claude Code's auto-compa
 
 ## Installation
 
+**Two steps: add the marketplace, then install the plugin.**
+
 ```bash
-/plugin install wxhou/context-recovery
+# Step 1: Add the marketplace (registers this GitHub repo as a plugin source)
+/plugin marketplace add wxhou/context-recovery
+
+# Step 2: Install the plugin
+/plugin install context-recovery@wxhou-context-recovery
 ```
 
 Then restart Claude Code.
