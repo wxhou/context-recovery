@@ -75,9 +75,38 @@ def extract_recent_work(transcript_path, session_id):
     return cleaned, unique_files
 
 
-def build_session_summary(session_id, transcript_path, source="unknown"):
+def extract_from_last_message(msg: str) -> list:
+    """Extract meaningful content from the last assistant message."""
+    if not msg:
+        return []
+    # Extract file paths
+    files = re.findall(
+        r'[\w\-\./]+\.(py|ts|tsx|js|jsx|md|json|yaml|yml|go|rs|java|cpp|c|h|toml)\b',
+        msg
+    )
+    # Extract key action hints (tool names, error mentions, etc.)
+    actions = []
+    # Look for what was done
+    if "Created" in msg or "created" in msg:
+        actions.append("_Files were created_")
+    if "Edited" in msg or "edited" in msg:
+        actions.append("_Files were edited_")
+    if "Deleted" in msg or "deleted" in msg:
+        actions.append("_Files were deleted_")
+    if "Error" in msg or "error" in msg:
+        actions.append("_Errors occurred_")
+    if "Completed" in msg or "completed" in msg:
+        actions.append("_Tasks were completed_")
+    return list(dict.fromkeys(files))[:10], actions
+
+
+def build_session_summary(session_id, transcript_path, source="unknown", last_message=""):
     """Build a structured session summary."""
     prompts, files = extract_recent_work(transcript_path, session_id)
+    msg_files, msg_actions = extract_from_last_message(last_message)
+
+    # Merge files from transcript and last message
+    all_files = list(dict.fromkeys(files + msg_files))[-15:]
 
     lines = [
         f"## Session Summary ({format_timestamp()})",
@@ -92,10 +121,16 @@ def build_session_summary(session_id, transcript_path, source="unknown"):
             escaped = p.replace("|", "\\|").replace("\n", " ")[:300]
             lines.append(f"- {escaped}")
 
-    if files:
+    if msg_actions:
+        lines.append("")
+        lines.append("### Session Outcomes")
+        for action in msg_actions:
+            lines.append(f"- {action}")
+
+    if all_files:
         lines.append("")
         lines.append("### Files Touched")
-        lines.append(", ".join(f"`{f}`" for f in files))
+        lines.append(", ".join(f"`{f}`" for f in all_files))
 
     return "\n".join(lines)
 
@@ -151,13 +186,17 @@ def main():
     if stop_hook_active:
         sys.exit(0)
 
+    # Capture last_assistant_message for richer summary
+    last_message = input_data.get("last_assistant_message", "")
+
     # Extract session summary
-    summary = build_session_summary(session_id, transcript_path)
+    summary = build_session_summary(session_id, transcript_path, last_message=last_message)
     append_to_context(summary, s_dir)
 
     log_event("stop", {
         "session_id": session_id,
         "transcript_path": transcript_path,
+        "last_message_length": len(last_message),
     })
 
     sys.exit(0)
