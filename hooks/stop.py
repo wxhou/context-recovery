@@ -2,7 +2,7 @@
 """
 ContextRecoveryHook - Stop Handler
 Runs when Claude finishes responding (session end). Extracts a structured
-session summary and writes it to CONTEXT.md as a permanent record.
+session summary and writes it to session-specific context.md as a permanent record.
 """
 import json
 import sys
@@ -13,6 +13,11 @@ from pathlib import Path
 
 def format_timestamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def session_dir(session_id: str) -> Path:
+    """Return the per-session directory for this session_id."""
+    return Path.home() / ".claude" / "sessions" / session_id
 
 
 def read_stdin() -> dict:
@@ -95,11 +100,10 @@ def build_session_summary(session_id, transcript_path, source="unknown"):
     return "\n".join(lines)
 
 
-def append_to_context(summary):
-    """Append session summary to CONTEXT.md."""
-    context_path = Path.home() / ".claude" / "CONTEXT.md"
+def append_to_context(summary, s_dir):
+    """Append session summary to session-specific context.md."""
+    context_path = s_dir / "context.md"
     if not context_path.exists():
-        # Only create if we're in a real session with transcript
         return
 
     try:
@@ -114,28 +118,23 @@ def append_to_context(summary):
         content = content.rstrip() + "\n\n" + summary
         context_path.write_text(content, encoding="utf-8")
     except Exception as e:
-        print(f"[stop] WARNING: failed to update CONTEXT.md: {e}", file=sys.stderr)
+        print(f"[stop] WARNING: failed to update context.md: {e}", file=sys.stderr)
 
 
 def log_event(event_type, data):
-    log_root = Path.home() / ".claude" / "logs"
-    log_root.mkdir(parents=True, exist_ok=True)
-    log_file = log_root / "events.json"
-
-    events = []
-    if log_file.exists():
-        try:
-            events = json.loads(log_file.read_text(encoding="utf-8"))
-        except Exception:
-            events = []
-
-    events.append({
-        "type": event_type,
-        "timestamp": format_timestamp(),
-        **data,
-    })
-    events = events[-100:]
-    log_file.write_text(json.dumps(events, indent=2, ensure_ascii=False), encoding="utf-8")
+    """Append a JSONL entry to session-specific events.jsonl (append-only)."""
+    log_file = Path.home() / ".claude" / "sessions" / data.get("session_id", "unknown") / "events.jsonl"
+    try:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        entry = json.dumps({
+            "type": event_type,
+            "timestamp": format_timestamp(),
+            **{k: v for k, v in data.items() if k != "session_id"},
+        }, ensure_ascii=False)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(entry + "\n")
+    except Exception as e:
+        print(f"[stop] WARNING: failed to log event: {e}", file=sys.stderr)
 
 
 def main():
@@ -144,6 +143,9 @@ def main():
     session_id = input_data.get("session_id", "unknown")
     transcript_path = input_data.get("transcript_path", "")
 
+    # Per-session directory
+    s_dir = session_dir(session_id)
+
     # Check stop_hook_active to avoid infinite loop
     stop_hook_active = input_data.get("stop_hook_active", False)
     if stop_hook_active:
@@ -151,7 +153,7 @@ def main():
 
     # Extract session summary
     summary = build_session_summary(session_id, transcript_path)
-    append_to_context(summary)
+    append_to_context(summary, s_dir)
 
     log_event("stop", {
         "session_id": session_id,

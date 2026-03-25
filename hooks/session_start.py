@@ -2,10 +2,10 @@
 """
 ContextRecoveryHook - SessionStart Handler
 Runs AFTER session starts (including resume from compaction) to:
-  1. Load and inject .claude/CONTEXT.md as additionalContext
-  2. Load .claude/TODO.md for active work items
+  1. Load and inject session-specific context.md as additionalContext
+  2. Load ~/.claude/TODO.md for active work items (global)
   3. Load recent transcript backup for context continuity
-  4. Log the session start event
+  4. Log the session start event to events.jsonl
 """
 import json
 import subprocess
@@ -17,6 +17,11 @@ from typing import Optional
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
+def session_dir(session_id: str) -> Path:
+    """Return the per-session directory for this session_id."""
+    return Path.home() / ".claude" / "sessions" / session_id
+
 
 def read_stdin() -> dict:
     raw = sys.stdin.read()
@@ -62,9 +67,9 @@ def get_git_status() -> dict:
         return {"branch": None, "changed_files": 0}
 
 
-def get_recent_backup() -> Optional[Path]:
-    """Find the most recent transcript backup."""
-    backup_root = Path.home() / ".claude" / "logs" / "transcript_backups"
+def get_recent_backup(s_dir: Path) -> Optional[Path]:
+    """Find the most recent transcript backup in the session directory."""
+    backup_root = s_dir / "transcript_backups"
     if not backup_root.exists():
         return None
 
@@ -115,13 +120,14 @@ def extract_context_from_backup(backup_path: Path, max_chars: int = 3000) -> str
         return ""
 
 
-def load_context_files() -> dict:
+def load_context_files(session_id: str) -> dict:
     """Load all context files and return a structured summary."""
+    s_dir = session_dir(session_id)
     claude_dir = Path.home() / ".claude"
 
-    context_md = safe_read(claude_dir / "CONTEXT.md")
-    todo_md = safe_read(claude_dir / "TODO.md")
-    recent_backup = get_recent_backup()
+    context_md = safe_read(s_dir / "context.md")
+    todo_md = safe_read(claude_dir / "TODO.md")  # Global TODO
+    recent_backup = get_recent_backup(s_dir)
 
     backup_snippet = ""
     if recent_backup:
@@ -135,11 +141,12 @@ def load_context_files() -> dict:
     }
 
 
-def build_additional_context(data: dict, source: str) -> str:
+def build_additional_context(data: dict, source: str, session_id: str) -> str:
     """Build the additionalContext string for SessionStart injection."""
     parts = []
     parts.append(f"## ContextRecovery: Session Start ({format_timestamp()})")
     parts.append(f"Session source: `{source}`")
+    parts.append(f"Session ID: `{session_id[:8]}...`")
 
     # Git status
     git = get_git_status()
@@ -148,14 +155,14 @@ def build_additional_context(data: dict, source: str) -> str:
 
     parts.append("")
 
-    # Context.md content
+    # Session-specific context.md content
     if data["context_md"]:
         parts.append("### 📋 Previous Session Context")
         parts.append("_Last updated before last compaction._")
         parts.append(data["context_md"][:2000])
         parts.append("")
 
-    # TODO.md content
+    # Global TODO.md content
     if data["todo_md"]:
         parts.append("### 📌 Active TODO Items")
         # Extract just the unchecked items
@@ -193,27 +200,19 @@ def build_additional_context(data: dict, source: str) -> str:
 
 
 def log_event(event_type: str, data: dict) -> None:
-    """Append to .claude/logs/events.json."""
-    log_root = Path.home() / ".claude" / "logs"
-    ensure_dir(log_root)
-    log_file = log_root / "events.json"
-
-    events = []
-    if log_file.exists():
-        try:
-            events = json.loads(log_file.read_text(encoding="utf-8"))
-        except Exception:
-            events = []
-
-    events.append({
-        "type": event_type,
-        "timestamp": format_timestamp(),
-        **data,
-    })
-
-    # Keep last 100 events
-    events = events[-100:]
-    log_file.write_text(json.dumps(events, indent=2, ensure_ascii=False), encoding="utf-8")
+    """Append a JSONL entry to session-specific events.jsonl (append-only)."""
+    log_file = Path.home() / ".claude" / "sessions" / data.get("session_id", "unknown") / "events.jsonl"
+    try:
+        ensure_dir(log_file.parent)
+        entry = json.dumps({
+            "type": event_type,
+            "timestamp": format_timestamp(),
+            **{k: v for k, v in data.items() if k != "session_id"},
+        }, ensure_ascii=False)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(entry + "\n")
+    except Exception as e:
+        print(f"[session_start] WARNING: failed to log event: {e}", file=sys.stderr)
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -224,8 +223,12 @@ def main() -> None:
     session_id = input_data.get("session_id", "unknown")
     source = input_data.get("source", "unknown")
 
-    # Load context files
-    data = load_context_files()
+    # Ensure session directory exists
+    s_dir = session_dir(session_id)
+    ensure_dir(s_dir)
+
+    # Load context files (session-specific context.md + global TODO.md)
+    data = load_context_files(session_id)
 
     # Log the event
     log_event("session_start", {
@@ -239,7 +242,7 @@ def main() -> None:
     # Inject additionalContext on resume and after compaction.
     # source values: startup (new), resume (--resume), clear (/clear), compact (after compaction)
     if source in ("resume", "compact", "startup") and (data["context_md"] or data["todo_md"]):
-        additional = build_additional_context(data, source)
+        additional = build_additional_context(data, source, session_id)
         output = {
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",

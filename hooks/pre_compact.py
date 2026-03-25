@@ -3,9 +3,9 @@
 ContextRecoveryHook - PreCompact Handler
 Runs BEFORE context compaction to:
   1. Backup the full transcript
-  2. Generate a structured context summary (.claude/CONTEXT.md)
+  2. Generate a structured context summary (session-specific context.md)
   3. Update TODO.md with current work state
-  4. Log the event to .claude/logs/pre_compact.json
+  4. Log the event to events.jsonl (append-only)
 """
 import argparse
 import json
@@ -19,6 +19,11 @@ from pathlib import Path
 from typing import Optional
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
+def session_dir(session_id: str) -> Path:
+    """Return the per-session directory for this session_id."""
+    return Path.home() / ".claude" / "sessions" / session_id
+
 
 def read_stdin() -> dict:
     raw = sys.stdin.read()
@@ -56,13 +61,13 @@ def format_timestamp() -> str:
 
 # ── core logic ────────────────────────────────────────────────────────────────
 
-def backup_transcript(transcript_path: str, trigger: str) -> Optional[Path]:
-    """Copy transcript to .claude/logs/transcript_backups/ with timestamp."""
+def backup_transcript(transcript_path: str, trigger: str, s_dir: Path) -> Optional[Path]:
+    """Copy transcript to session-specific backup dir with timestamp."""
     src = Path(transcript_path).expanduser()
     if not src.exists():
         return None
 
-    backup_root = Path.home() / ".claude" / "logs" / "transcript_backups"
+    backup_root = s_dir / "transcript_backups"
     ensure_dir(backup_root)
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -133,7 +138,7 @@ def extract_key_content(transcript_path: str) -> dict:
 
 
 def generate_context_summary(transcript_path: str, session_id: str) -> str:
-    """Generate a structured context summary for .claude/CONTEXT.md."""
+    """Generate a structured context summary for session-specific context.md."""
     data = extract_key_content(transcript_path)
 
     lines = [
@@ -180,7 +185,7 @@ def generate_context_summary(transcript_path: str, session_id: str) -> str:
 
 
 def update_todo_state() -> bool:
-    """Update .claude/TODO.md with current timestamp to signal session continuity."""
+    """Update ~/.claude/TODO.md with current timestamp to signal session continuity."""
     todo_path = Path.home() / ".claude" / "TODO.md"
     if not todo_path.exists():
         return False
@@ -201,27 +206,19 @@ def update_todo_state() -> bool:
 
 
 def log_event(event_type: str, data: dict) -> None:
-    """Append to .claude/logs/events.json."""
-    log_root = Path.home() / ".claude" / "logs"
-    ensure_dir(log_root)
-    log_file = log_root / "events.json"
-
-    events = []
-    if log_file.exists():
-        try:
-            events = json.loads(log_file.read_text(encoding="utf-8"))
-        except Exception:
-            events = []
-
-    events.append({
-        "type": event_type,
-        "timestamp": format_timestamp(),
-        **data,
-    })
-
-    # Keep last 100 events
-    events = events[-100:]
-    log_file.write_text(json.dumps(events, indent=2, ensure_ascii=False), encoding="utf-8")
+    """Append a JSONL entry to session-specific events.jsonl (append-only)."""
+    log_file = Path.home() / ".claude" / "sessions" / data.get("session_id", "unknown") / "events.jsonl"
+    try:
+        ensure_dir(log_file.parent)
+        entry = json.dumps({
+            "type": event_type,
+            "timestamp": format_timestamp(),
+            **{k: v for k, v in data.items() if k != "session_id"},
+        }, ensure_ascii=False)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(entry + "\n")
+    except Exception as e:
+        print(f"[pre_compact] WARNING: failed to log event: {e}", file=sys.stderr)
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -231,7 +228,7 @@ def main() -> None:
     parser.add_argument("--backup", action="store_true",
                         help="Create transcript backup")
     parser.add_argument("--generate-context", action="store_true",
-                        help="Generate CONTEXT.md summary")
+                        help="Generate context.md summary")
     parser.add_argument("--verbose", action="store_true",
                         help="Print verbose output")
     args = parser.parse_args()
@@ -243,23 +240,26 @@ def main() -> None:
     trigger = input_data.get("trigger", "unknown")
     custom_instructions = input_data.get("custom_instructions", "")
 
+    # Per-session directory
+    s_dir = session_dir(session_id)
+    ensure_dir(s_dir)
+
     results = {}
 
     # 1. Backup transcript
     if args.backup and transcript_path:
-        backup_path = backup_transcript(transcript_path, trigger)
+        backup_path = backup_transcript(transcript_path, trigger, s_dir)
         if backup_path:
             results["backup"] = str(backup_path)
             if args.verbose:
                 print(f"Transcript backed up to: {backup_path}", file=sys.stdout)
             # Rotate: keep newest 10 + any from last 7 days
-            backup_root = Path.home() / ".claude" / "logs" / "transcript_backups"
-            rotate_backups(backup_root)
+            rotate_backups(s_dir / "transcript_backups")
 
     # 2. Generate context summary
     if args.generate_context and transcript_path:
         summary = generate_context_summary(transcript_path, session_id)
-        context_path = Path.home() / ".claude" / "CONTEXT.md"
+        context_path = s_dir / "context.md"
         safe_write(context_path, summary)
         results["context_generated"] = str(context_path)
         if args.verbose:

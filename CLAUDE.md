@@ -20,21 +20,23 @@ Three-phase context preservation: PreCompact backup → PostCompact capture → 
 ## Architecture
 
 ```
+Per-session isolation: ~/.claude/sessions/{session_id}/
+
 PreCompact (before compaction) ──→ PostCompact ──→ SessionStart (on resume)
      │                                    │
-     ├─ backup transcript                  ├─ save compact_summary
-     ├─ rotate old backups               │
-     ├─ generate CONTEXT.md               │
-     ├─ update TODO.md                    │
-     └─ log event                         │
+     ├─ backup transcript → sessions/{id}/transcript_backups/
+     ├─ rotate old backups               ├─ save compact_summary
+     ├─ generate sessions/{id}/context.md│
+     ├─ update ~/.claude/TODO.md         │
+     └─ log → sessions/{id}/events.jsonl│
                                           │
                               Stop (session end):
-                              └─ append session summary to CONTEXT.md
+                              └─ append session summary to context.md
 
                               SessionStart:
-                              ├─ load CONTEXT.md
-                              ├─ load TODO.md
-                              ├─ load backup snippet
+                              ├─ load sessions/{id}/context.md
+                              ├─ load ~/.claude/TODO.md (global)
+                              ├─ load sessions/{id}/transcript_backups/ (recent)
                               └─ inject additionalContext
 ```
 
@@ -51,10 +53,13 @@ PreCompact (before compaction) ──→ PostCompact ──→ SessionStart (on 
 ## Maintenance
 
 - Python: `#!/usr/bin/env python3` (pure stdlib, no external dependencies)
-- Logging: `~/.claude/logs/events.json`
-- Backups: `~/.claude/logs/transcript_backups/`
+- Per-session isolation: `~/.claude/sessions/{session_id}/` (multi-window safe)
+- Global TODO: `~/.claude/TODO.md` (shared across all sessions)
+- Backups: `~/.claude/sessions/{session_id}/transcript_backups/`
+- Logging: `~/.claude/sessions/{session_id}/events.jsonl` (JSONL append-only)
 - Backup rotation: newest 10 + last 7 days (auto-cleanup)
-- First-run: Setup hook creates dirs + template files (idempotent)
+- First-run: Setup hook creates base dirs + global TODO.md (idempotent)
+- All hooks: `session_dir()` helper resolves `~/.claude/sessions/{session_id}/`
 
 ## Test
 
