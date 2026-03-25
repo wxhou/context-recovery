@@ -27,15 +27,20 @@ Then restart Claude Code.
     ├─ 生成模板 TODO.md
     └─ 记录事件 → logs/events.json
 
-自动压缩触发 (70% 上下文满)
-    ↓ PreCompact (matcher: "auto")
+压缩触发 (自动 /manual 或 auto)
+    ↓ PreCompact (matcher: "auto|manual")
     ├─ 备份 transcript → ~/.claude/logs/transcript_backups/
     ├─ 生成 CONTEXT.md (最近 prompts + 文件)
     ├─ 更新时间戳 TODO.md
     └─ 记录事件 → logs/events.json
 
-下次会话启动
-    ↓ SessionStart
+压缩完成
+    ↓ PostCompact
+    ├─ 保存压缩摘要 compact_summary 到 CONTEXT.md
+    └─ 记录事件 → logs/events.json
+
+会话恢复
+    ↓ SessionStart (source: "compact")
     ├─ 读取 CONTEXT.md
     ├─ 读取 TODO.md
     ├─ 加载最近 backup snippet
@@ -48,9 +53,10 @@ Then restart Claude Code.
 
 | Feature | Description |
 |---------|-------------|
-| **Auto-backup** | Transcript backed up to `~/.claude/logs/transcript_backups/` before every auto-compaction |
+| **Auto-backup** | Transcript backed up to `~/.claude/logs/transcript_backups/` before every compaction (auto + manual) |
 | **Context generation** | Extracts recent prompts and file paths into `~/.claude/CONTEXT.md` |
-| **Session recovery** | SessionStart hook injects saved context as `additionalContext` on resume |
+| **Compact summary** | Captures `compact_summary` after compaction and appends to CONTEXT.md |
+| **Session recovery** | SessionStart injects saved context on resume/compact/startup |
 | **TODO tracking** | Timestamps `~/.claude/TODO.md` for work continuity |
 | **Event logging** | All events logged to `~/.claude/logs/events.json` |
 | **Slash commands** | `/context-save`, `/context-restore` |
@@ -70,6 +76,7 @@ Then restart Claude Code.
 ├── hooks/
 │   ├── setup.py          # Setup hook — first-run initialization
 │   ├── pre_compact.py    # PreCompact hook handler
+│   ├── post_compact.py   # PostCompact hook handler
 │   └── session_start.py  # SessionStart hook handler
 ├── CONTEXT.md            # Auto-generated context summary
 ├── TODO.md               # Manual TODO items
@@ -102,11 +109,11 @@ Auto-generated before each compaction. **Do not edit** — it's overwritten.
 
 | | ContextRecoveryHook | mono |
 |-|--------------------|------|
-| Scope | 3 hooks | 23 commands |
+| Scope | 4 hooks | 23 commands |
 | Learning curve | Low | High |
 | Dependencies | Python stdlib only | Python + uv |
 | Context files | CONTEXT.md + TODO.md | memory/*.md |
-| Weight | **~480 lines** | ~2000+ lines |
+| Weight | **~540 lines** | ~2000+ lines |
 
 ---
 
@@ -117,6 +124,7 @@ Auto-generated before each compaction. **Do not edit** — it's overwritten.
 # Or manually: remove hook entries from settings.local.json, then:
 rm ~/.claude/hooks/setup.py
 rm ~/.claude/hooks/pre_compact.py
+rm ~/.claude/hooks/post_compact.py
 rm ~/.claude/hooks/session_start.py
 # Restart Claude Code
 ```

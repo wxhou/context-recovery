@@ -236,8 +236,9 @@ def main() -> None:
         "recent_backup": data["recent_backup"],
     })
 
-    # Only inject additionalContext on resume (not fresh startup)
-    if source in ("resume", "startup") and (data["context_md"] or data["todo_md"]):
+    # Inject additionalContext on resume and after compaction.
+    # source values: startup (new), resume (--resume), clear (/clear), compact (after compaction)
+    if source in ("resume", "compact", "startup") and (data["context_md"] or data["todo_md"]):
         additional = build_additional_context(data, source)
         output = {
             "hookSpecificOutput": {
@@ -245,7 +246,9 @@ def main() -> None:
                 "additionalContext": additional,
             }
         }
-        print(json.dumps(output))
+        sys.stdout.flush()
+        sys.stderr.flush()
+        print(json.dumps(output), flush=True)
         sys.exit(0)
 
     sys.exit(0)

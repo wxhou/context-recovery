@@ -12,9 +12,20 @@
         ]
       }
     ],
+    "PostCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post_compact.py"
+          }
+        ]
+      }
+    ],
     "PreCompact": [
       {
-        "matcher": "auto",
+        "matcher": "auto|manual",
         "hooks": [
           {
             "type": "command",

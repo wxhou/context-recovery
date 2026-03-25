@@ -15,18 +15,23 @@
 
 ## Purpose
 
-Two-phase context preservation: PreCompact backup → SessionStart recovery.
-Prevents "context amnesia" during Claude Code auto-compaction.
+Two-phase context preservation: PreCompact backup → PostCompact capture → SessionStart recovery.
 
 ## Architecture
 
 ```
-PreCompact (before compaction) ──→ SessionStart (on resume)
-     │                                      │
-     ├─ backup transcript                  ├─ load CONTEXT.md
-     ├─ generate CONTEXT.md                 ├─ load TODO.md
-     ├─ update TODO.md                      ├─ load backup snippet
-     └─ log event                           └─ inject additionalContext
+PreCompact (before compaction) ──→ PostCompact ──→ SessionStart (on resume)
+     │                                    │
+     ├─ backup transcript                  ├─ save compact_summary
+     ├─ generate CONTEXT.md                │
+     ├─ update TODO.md                     │
+     └─ log event                           │
+                                          │
+                                    SessionStart:
+                                    ├─ load CONTEXT.md
+                                    ├─ load TODO.md
+                                    ├─ load backup snippet
+                                    └─ inject additionalContext
 ```
 
 ## Key Files
@@ -35,9 +40,9 @@ PreCompact (before compaction) ──→ SessionStart (on resume)
 |------|---------|
 | `hooks/setup.py` | First-run: create dirs + template files |
 | `hooks/pre_compact.py` | Before compaction: backup + generate context |
-| `hooks/session_start.py` | On session start: inject saved context |
+| `hooks/post_compact.py` | After compaction: save compact_summary to CONTEXT.md |
+| `hooks/session_start.py` | On session start: inject saved context (handles `compact` source) |
 | `hooks/hooks.json` | Hook configuration manifest |
-| `install.sh` | Installation script |
 
 ## Maintenance
 
