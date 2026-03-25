@@ -1,0 +1,31 @@
+{
+  "description": "ContextRecoveryHook: backup before compaction, restore after. Prevents context amnesia during auto-compaction.",
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/pre_compact.py"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session_start.py"
+          }
+        ]
+      }
+    ]
+  },
+  "commands": {
+    "context-save": "commands/context-save.md",
+    "context-restore": "commands/context-restore.md"
+  }
+}

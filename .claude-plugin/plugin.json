@@ -1,0 +1,9 @@
+{
+  "name": "context-recovery",
+  "version": "0.1.0",
+  "description": "ContextRecoveryHook: PreCompact backup + SessionStart recovery for Claude Code. Prevents context amnesia during auto-compaction.",
+  "author": {
+    "name": "wxhou"
+  },
+  "homepage": "https://github.com/wxhou/context-recovery"
+}

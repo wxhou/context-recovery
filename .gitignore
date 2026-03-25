@@ -1,0 +1,19 @@
+# Claude Code
+.claude/
+settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+.venv/
+venv/
+ENV/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
