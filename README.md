@@ -30,6 +30,7 @@ Then restart Claude Code.
 压缩触发 (自动 /manual 或 auto)
     ↓ PreCompact (matcher: "auto|manual")
     ├─ 备份 transcript → ~/.claude/logs/transcript_backups/
+    ├─ 清理旧备份 (保留最新 10 个 + 最近 7 天)
     ├─ 生成 CONTEXT.md (最近 prompts + 文件)
     ├─ 更新时间戳 TODO.md
     └─ 记录事件 → logs/events.json
@@ -45,6 +46,11 @@ Then restart Claude Code.
     ├─ 读取 TODO.md
     ├─ 加载最近 backup snippet
     └─ 注入 additionalContext → Claude 自动获得上下文
+
+会话结束
+    ↓ Stop
+    ├─ 从 transcript 提取结构化 session summary
+    └─ 追加到 CONTEXT.md
 ```
 
 ---
@@ -58,7 +64,7 @@ Then restart Claude Code.
 | **Compact summary** | Captures `compact_summary` after compaction and appends to CONTEXT.md |
 | **Session recovery** | SessionStart injects saved context on resume/compact/startup |
 | **TODO tracking** | Timestamps `~/.claude/TODO.md` for work continuity |
-| **Event logging** | All events logged to `~/.claude/logs/events.json` |
+| **Backup rotation** | Auto-cleanup: keep newest 10 + last 7 days |
 | **Slash commands** | `/context-save`, `/context-restore` |
 
 ---
@@ -77,7 +83,8 @@ Then restart Claude Code.
 │   ├── setup.py          # Setup hook — first-run initialization
 │   ├── pre_compact.py    # PreCompact hook handler
 │   ├── post_compact.py   # PostCompact hook handler
-│   └── session_start.py  # SessionStart hook handler
+│   ├── session_start.py  # SessionStart hook handler
+│   └── stop.py           # Stop hook handler
 ├── CONTEXT.md            # Auto-generated context summary
 ├── TODO.md               # Manual TODO items
 └── logs/
@@ -109,11 +116,11 @@ Auto-generated before each compaction. **Do not edit** — it's overwritten.
 
 | | ContextRecoveryHook | mono |
 |-|--------------------|------|
-| Scope | 4 hooks | 23 commands |
+| Scope | 5 hooks | 23 commands |
 | Learning curve | Low | High |
 | Dependencies | Python stdlib only | Python + uv |
 | Context files | CONTEXT.md + TODO.md | memory/*.md |
-| Weight | **~540 lines** | ~2000+ lines |
+| Weight | **~650 lines** | ~2000+ lines |
 
 ---
 
@@ -126,6 +133,7 @@ rm ~/.claude/hooks/setup.py
 rm ~/.claude/hooks/pre_compact.py
 rm ~/.claude/hooks/post_compact.py
 rm ~/.claude/hooks/session_start.py
+rm ~/.claude/hooks/stop.py
 # Restart Claude Code
 ```
 

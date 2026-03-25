@@ -14,7 +14,7 @@ import re
 import shutil
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -75,6 +75,36 @@ def backup_transcript(transcript_path: str, trigger: str) -> Optional[Path]:
     except Exception as e:
         print(f"[pre_compact] WARNING: backup failed: {e}", file=sys.stderr)
         return None
+
+
+def rotate_backups(backup_root, max_count=10, max_age_days=7):
+    """Keep newest max_count backups and any from last max_age_days. Delete rest."""
+    try:
+        backups = sorted(backup_root.glob("transcript_*.jsonl"),
+                         key=lambda p: p.stat().st_mtime,
+                         reverse=True)
+        if len(backups) <= max_count:
+            return
+
+        cutoff = datetime.now() - timedelta(days=max_age_days)
+        kept = set(backups[:max_count])  # Always keep newest max_count
+
+        # Also keep any from last max_age_days
+        for p in backups:
+            if datetime.fromtimestamp(p.stat().st_mtime) >= cutoff:
+                kept.add(p)
+
+        to_delete = [p for p in backups if p not in kept]
+        for p in to_delete:
+            try:
+                p.unlink()
+            except Exception:
+                pass
+
+        if to_delete:
+            print(f"[pre_compact] Cleaned {len(to_delete)} old backup(s)", file=sys.stdout)
+    except Exception:
+        pass  # Rotation is best-effort
 
 
 def extract_key_content(transcript_path: str) -> dict:
@@ -222,6 +252,9 @@ def main() -> None:
             results["backup"] = str(backup_path)
             if args.verbose:
                 print(f"Transcript backed up to: {backup_path}", file=sys.stdout)
+            # Rotate: keep newest 10 + any from last 7 days
+            backup_root = Path.home() / ".claude" / "logs" / "transcript_backups"
+            rotate_backups(backup_root)
 
     # 2. Generate context summary
     if args.generate_context and transcript_path:

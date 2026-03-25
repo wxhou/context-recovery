@@ -15,7 +15,7 @@
 
 ## Purpose
 
-Two-phase context preservation: PreCompact backup → PostCompact capture → SessionStart recovery.
+Three-phase context preservation: PreCompact backup → PostCompact capture → SessionStart recovery → Stop summary.
 
 ## Architecture
 
@@ -23,15 +23,19 @@ Two-phase context preservation: PreCompact backup → PostCompact capture → Se
 PreCompact (before compaction) ──→ PostCompact ──→ SessionStart (on resume)
      │                                    │
      ├─ backup transcript                  ├─ save compact_summary
-     ├─ generate CONTEXT.md                │
-     ├─ update TODO.md                     │
-     └─ log event                           │
+     ├─ rotate old backups               │
+     ├─ generate CONTEXT.md               │
+     ├─ update TODO.md                    │
+     └─ log event                         │
                                           │
-                                    SessionStart:
-                                    ├─ load CONTEXT.md
-                                    ├─ load TODO.md
-                                    ├─ load backup snippet
-                                    └─ inject additionalContext
+                              Stop (session end):
+                              └─ append session summary to CONTEXT.md
+
+                              SessionStart:
+                              ├─ load CONTEXT.md
+                              ├─ load TODO.md
+                              ├─ load backup snippet
+                              └─ inject additionalContext
 ```
 
 ## Key Files
@@ -40,7 +44,7 @@ PreCompact (before compaction) ──→ PostCompact ──→ SessionStart (on 
 |------|---------|
 | `hooks/setup.py` | First-run: create dirs + template files |
 | `hooks/pre_compact.py` | Before compaction: backup + generate context |
-| `hooks/post_compact.py` | After compaction: save compact_summary to CONTEXT.md |
+| `hooks/stop.py` | Session end: extract session summary into CONTEXT.md |
 | `hooks/session_start.py` | On session start: inject saved context (handles `compact` source) |
 | `hooks/hooks.json` | Hook configuration manifest |
 
@@ -49,6 +53,7 @@ PreCompact (before compaction) ──→ PostCompact ──→ SessionStart (on 
 - Python: `#!/usr/bin/env python3` (pure stdlib, no external dependencies)
 - Logging: `~/.claude/logs/events.json`
 - Backups: `~/.claude/logs/transcript_backups/`
+- Backup rotation: newest 10 + last 7 days (auto-cleanup)
 - First-run: Setup hook creates dirs + template files (idempotent)
 
 ## Test
