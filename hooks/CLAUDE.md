@@ -7,6 +7,8 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #4770 | 5:04 PM | 🔵 | ContextRecoveryHook Configuration Discovered | ~276 |
+| #4766 | 5:03 PM | 🟣 | ContextRecoveryHook Implementation Created | ~286 |
+| #4765 | " | 🔄 | Context Recovery Hooks Structure Simplified | ~210 |
 | #4743 | 4:41 PM | 🟣 | ContextRecoveryHook Plugin Project Created | ~278 |
-| #4741 | 4:40 PM | ✅ | ContextRecoveryHook Plugin Directory Structure Created | ~185 |
 </claude-mem-context>

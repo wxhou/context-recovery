@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/pre_compact.py"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre_compact.py"
           }
         ]
       }
@@ -18,14 +18,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session_start.py"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py"
           }
         ]
       }
     ]
-  },
-  "commands": {
-    "context-save": "commands/context-save.md",
-    "context-restore": "commands/context-restore.md"
   }
 }
