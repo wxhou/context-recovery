@@ -1,8 +1,4 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.11"
-# dependencies = []
-# ///
+#!/usr/bin/env python3
 """
 ContextRecoveryHook - PreCompact Handler
 Runs BEFORE context compaction to:
@@ -20,6 +16,7 @@ import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -59,7 +56,7 @@ def format_timestamp() -> str:
 
 # ── core logic ────────────────────────────────────────────────────────────────
 
-def backup_transcript(transcript_path: str, trigger: str) -> Path | None:
+def backup_transcript(transcript_path: str, trigger: str) -> Optional[Path]:
     """Copy transcript to .claude/logs/transcript_backups/ with timestamp."""
     src = Path(transcript_path).expanduser()
     if not src.exists():

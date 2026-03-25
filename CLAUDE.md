@@ -33,21 +33,22 @@ PreCompact (before compaction) ──→ SessionStart (on resume)
 
 | File | Purpose |
 |------|---------|
-| `hooks-handlers/pre_compact.py` | Before compaction: backup + generate context |
-| `hooks-handlers/session_start.py` | On session start: inject saved context |
+| `hooks/setup.py` | First-run: create dirs + template files |
+| `hooks/pre_compact.py` | Before compaction: backup + generate context |
+| `hooks/session_start.py` | On session start: inject saved context |
 | `hooks/hooks.json` | Hook configuration manifest |
 | `install.sh` | Installation script |
 
 ## Maintenance
 
-- Python: `#!/usr/bin/env -S uv run --script` (zero-dependency)
-- Pure stdlib only
+- Python: `#!/usr/bin/env python3` (pure stdlib, no external dependencies)
 - Logging: `~/.claude/logs/events.json`
 - Backups: `~/.claude/logs/transcript_backups/`
+- First-run: Setup hook creates dirs + template files (idempotent)
 
 ## Test
 
 ```bash
 echo '{"session_id":"test","transcript_path":"~/.claude/test.jsonl","trigger":"auto"}' | \
-  uv run hooks-handlers/pre_compact.py --backup --generate-context --verbose
+  python3 hooks/pre_compact.py --backup --generate-context --verbose
 ```

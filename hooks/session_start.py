@@ -1,8 +1,4 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.11"
-# dependencies = []
-# ///
+#!/usr/bin/env python3
 """
 ContextRecoveryHook - SessionStart Handler
 Runs AFTER session starts (including resume from compaction) to:
@@ -17,6 +13,7 @@ import sys
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -65,7 +62,7 @@ def get_git_status() -> dict:
         return {"branch": None, "changed_files": 0}
 
 
-def get_recent_backup() -> Path | None:
+def get_recent_backup() -> Optional[Path]:
     """Find the most recent transcript backup."""
     backup_root = Path.home() / ".claude" / "logs" / "transcript_backups"
     if not backup_root.exists():
