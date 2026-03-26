@@ -5,10 +5,30 @@ Runs when Claude finishes responding (session end). Extracts a structured
 session summary and writes it to session-specific context.md as a permanent record.
 """
 import json
-import sys
+import os
 import re
+import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Write content to path atomically via temp file + rename."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_", suffix="_" + path.name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def format_timestamp():
@@ -42,8 +62,7 @@ def safe_read(path, limit=0):
 
 def safe_write(path, content):
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        _atomic_write(path, content)
     except Exception as e:
         print(f"[stop] WARNING: failed to write {path}: {e}", file=sys.stderr)
 
@@ -107,7 +126,7 @@ def extract_recent_work(transcript_path, session_id):
 def extract_from_last_message(msg: str) -> list:
     """Extract meaningful content from the last assistant message."""
     if not msg:
-        return []
+        return [], []
     # Extract file paths
     files = re.findall(
         r'[\w\-\./]+\.(py|ts|tsx|js|jsx|md|json|yaml|yml|go|rs|java|cpp|c|h|toml)\b',
@@ -180,7 +199,7 @@ def append_to_context(summary, s_dir):
 
         # Keep header + recovery notes, append summary
         content = content.rstrip() + "\n\n" + summary
-        context_path.write_text(content, encoding="utf-8")
+        _atomic_write(context_path, content)
     except Exception as e:
         print(f"[stop] WARNING: failed to update context.md: {e}", file=sys.stderr)
 

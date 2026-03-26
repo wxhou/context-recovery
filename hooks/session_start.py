@@ -92,7 +92,12 @@ def _extract_section(context_md: str, section_start: str) -> str:
     parts = after_marker.split("\n## ")
     # The first part (parts[0]) is the section body
     # If parts[1] starts with ##, that's the next section — our section ends here
-    return parts[0].strip()
+    body = parts[0]
+    # Strip the heading line itself (the first line after marker)
+    first_newline = body.find("\n")
+    if first_newline >= 0:
+        body = body[first_newline:]
+    return body.strip()
 
 
 def _extract_user_notes(context_md: str) -> str:

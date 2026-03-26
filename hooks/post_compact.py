@@ -7,9 +7,29 @@ Runs AFTER context compaction completes to:
 Safe to run on both auto and manual compaction.
 """
 import json
+import os
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Write content to path atomically via temp file + rename."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_", suffix="_" + path.name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def format_timestamp():
@@ -58,7 +78,7 @@ def append_to_context(summary: str, s_dir: Path) -> None:
         content += f"\n\n## Compaction Summary\n"
         content += f"_Captured at {format_timestamp()}_  \n"
         content += f"> {summary[:2000]}\n"
-        context_path.write_text(content, encoding="utf-8")
+        _atomic_write(context_path, content)
     except Exception as e:
         print(f"[post_compact] WARNING: failed to update context.md: {e}", file=sys.stderr)
 
