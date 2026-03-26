@@ -1,35 +1,61 @@
 {
+  "description": "ContextRecoveryHook - PreCompact backup + SessionStart recovery for Claude Code",
   "hooks": {
     "PreCompact": [
       {
-        "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/pre_compact.py --backup --generate-context",
-        "timeout": 30
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/pre_compact.py --backup --generate-context",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "PostCompact": [
       {
-        "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/post_compact.py",
-        "timeout": 30
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/post_compact.py",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "SessionStart": [
       {
         "matcher": "startup|resume|compact|clear",
-        "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py",
-        "timeout": 30
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "SessionEnd": [
       {
         "matcher": "clear|logout|error|unknown",
-        "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_end.py",
-        "timeout": 30
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_end.py",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "Stop": [
       {
-        "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop.py",
-        "timeout": 30
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop.py",
+            "timeout": 30
+          }
+        ]
       }
     ]
   }
