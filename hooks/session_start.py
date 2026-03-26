@@ -12,7 +12,7 @@ import json
 import subprocess
 import sys
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -76,157 +76,212 @@ def get_git_status() -> dict:
         return {"branch": None, "changed_files": 0}
 
 
-def get_recent_backup(s_dir: Path) -> Optional[Path]:
-    """Find the most recent transcript backup in the session directory."""
-    backup_root = s_dir / "transcript_backups"
-    if not backup_root.exists():
-        return None
+def _extract_section(context_md: str, section_start: str) -> str:
+    """Extract a named section from context.md.
 
-    backups = sorted(backup_root.glob("transcript_*.jsonl"),
-                     key=lambda p: p.stat().st_mtime,
-                     reverse=True)
-    if not backups:
-        return None
+    Finds the section heading, returns content until the next top-level
+    ## heading (i.e., ``\n## `` = newline + ## + space at line start).
+    Returns empty string if not found.
+    """
+    marker = f"\n{section_start}"
+    if marker not in context_md:
+        return ""
+    after_marker = context_md.split(marker, 1)[1]
 
-    # Only return if backup is less than 7 days old
-    newest = backups[0]
-    age = datetime.now() - datetime.fromtimestamp(newest.stat().st_mtime)
-    if age > timedelta(days=7):
-        return None
-    return newest
-
-
-JUNK_PATTERNS = (
-    "API Error:",
-    "rate_limit",
-    "invalid_request_error",
-    "overloaded",
-    "No response requested",
-    "(no content)",
-    "[Request interrupted by user]",
-)
+    # Split on \n##  — each top-level heading creates a new part
+    parts = after_marker.split("\n## ")
+    # The first part (parts[0]) is the section body
+    # If parts[1] starts with ##, that's the next section — our section ends here
+    return parts[0].strip()
 
 
-def _is_junk(text: str) -> bool:
-    return any(p in text for p in JUNK_PATTERNS)
+def _extract_user_notes(context_md: str) -> str:
+    """Extract the user's handwritten notes from the ## Recovery Notes section.
+
+    Strips template prompts, auto-fill blocks, and the Previous Recovery Notes
+    subsection (which is shown separately as "Notes from Previous Cycle").
+    Returns the user's actual notes for the current cycle.
+    """
+    notes_section = _extract_section(context_md, "## Recovery Notes")
+    if not notes_section:
+        return ""
+
+    # Cut off at Previous Recovery Notes subsection boundary
+    prev_notes_marker = "\n### 📝 Previous Recovery Notes"
+    if prev_notes_marker in notes_section:
+        notes_section = notes_section.split(prev_notes_marker, 1)[0]
+
+    # If auto-fill is present, take everything after the --- separator
+    has_auto_fill = "_**Auto-filled" in notes_section or "_Auto-filled" in notes_section
+    if has_auto_fill and "---" in notes_section:
+        notes_section = notes_section.split("---", 1)[1]
+    elif has_auto_fill:
+        notes_section = ""
+
+    lines = []
+    for line in notes_section.splitlines():
+        stripped = line.strip()
+        # Skip template prompts, section headers, horizontal rules, auto-fill sections
+        if stripped.startswith("_Add your notes here") or stripped.startswith("_what files"):
+            continue
+        if stripped.startswith("_**") or stripped.startswith("_<"):
+            continue
+        if stripped.startswith("---") or stripped.startswith(">"):
+            continue
+        if stripped.startswith("**Files") or stripped.startswith("**What"):
+            continue
+        if stripped.startswith("**Suggested") or stripped.startswith("**Decisions"):
+            continue
+        if stripped.startswith("_") and stripped.endswith("_"):
+            continue  # skip markdown italic lines like "_user wrote:_"
+        if stripped.startswith("### 📝"):
+            continue  # skip Previous Recovery Notes subsection header
+        lines.append(line)
+
+    result = "\n".join(lines).strip()
+    return result[:600]
 
 
-def _collect_text_from_content(content) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for part in content:
-            if isinstance(part, dict) and part.get("type") == "text":
-                t = part.get("text", "")
-                if t:
-                    parts.append(t)
-        return "\n".join(parts)
+def _extract_files_touched(context_md: str) -> str:
+    """Extract the Files Recently Touched section from context.md.
+
+    Files appear under ### Files Recently Touched anywhere in the document.
+    Uses reverse search so we find the most recent occurrence.
+    """
+    # Search for the heading anywhere in the document (reverse to find last occurrence)
+    for heading in ("### Files Recently Touched",):
+        # heading starts with ###; markdown headings are on their own lines
+        needle = f"\n{heading}"  # "\n### Files Recently Touched"
+        # Find all occurrences
+        start = 0
+        last_pos = -1
+        while True:
+            pos = context_md.find(needle, start)
+            if pos == -1:
+                break
+            last_pos = pos
+            start = pos + 1
+
+        if last_pos >= 0:
+            section = context_md[last_pos + len(needle):]
+            # Skip the heading line itself
+            first_newline = section.find("\n")
+            if first_newline >= 0:
+                section = section[first_newline:]
+            # Stop at next ## heading (top-level) or ### sibling subsection
+            # Use find on both to capture whichever comes first
+            next_top = section.find("\n## ")
+            next_sub = section.find("\n### ")
+            if next_top != -1 and next_sub != -1:
+                section = section[:min(next_top, next_sub)]
+            elif next_top != -1:
+                section = section[:next_top]
+            elif next_sub != -1:
+                section = section[:next_sub]
+            section = section.strip()
+            # Remove code fences: strip ``` pairs from start/end, collect middle content
+            code_content_lines = []
+            for line in section.splitlines():
+                stripped = line.strip()
+                if stripped == "```":
+                    continue  # skip fence lines
+                code_content_lines.append(stripped)
+            return "\n".join(code_content_lines)
     return ""
 
 
-def extract_context_from_backup(backup_path: Path, max_chars: int = 3000) -> str:
-    """Extract last few exchanges from transcript backup for context continuity."""
-    try:
-        # Read full content then slice (Python 3.9 compat — no limit param)
-        raw = backup_path.read_text(encoding="utf-8")
-        content = raw[:max_chars * 2]
-        lines = content.strip().splitlines()
-        # Take last 20 lines max
-        recent = lines[-20:] if len(lines) > 20 else lines
-
-        # Extract just the last user/assistant exchanges
-        result = []
-        for line in recent:
-            try:
-                obj = json.loads(line)
-                role = obj.get("message", {}).get("role", "")
-                content_text = _collect_text_from_content(obj.get("message", {}).get("content", ""))
-                if content_text and not _is_junk(content_text):
-                    prefix = "👤 " if role == "user" else "🤖 "
-                    result.append(f"{prefix}{content_text[:300]}")
-            except Exception:
-                pass
-        return "\n".join(result[-10:])  # last 10 exchanges
-    except Exception:
+def _extract_previous_recovery_notes(context_md: str) -> str:
+    """Extract Previous Recovery Notes (from previous cycle, preserved across cycles)."""
+    section = _extract_section(context_md, "### 📝 Previous Recovery Notes")
+    if not section:
         return ""
+    # Skip the preservation header
+    lines = []
+    for line in section.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("_Preserved from"):
+            continue
+        if stripped.startswith("---") or stripped.startswith(">"):
+            continue
+        lines.append(line)
+    result = "\n".join(lines).strip()
+    return result[:500]
 
 
-def load_context_files(session_id: str) -> dict:
-    """Load all context files and return a structured summary."""
+def load_session_context(session_id: str) -> dict:
+    """
+    Load session context for SessionStart injection.
+
+    Returns only what ContextRecoveryHook provides that claude-mem doesn't:
+    - recovery_notes: user's handwritten notes from previous session
+    - files_touched: files worked on (raw fact, not AI-compressed)
+    - previous_notes: notes preserved from even earlier cycles
+    - context_md_raw: full context.md for reference
+    """
     s_dir = session_dir(session_id)
-    claude_dir = Path.home() / ".claude"
-
     context_md = safe_read(s_dir / "context.md")
-    todo_md = safe_read(claude_dir / "TODO.md")  # Global TODO
-    recent_backup = get_recent_backup(s_dir)
-
-    backup_snippet = ""
-    if recent_backup:
-        backup_snippet = extract_context_from_backup(recent_backup)
 
     return {
-        "context_md": context_md,
-        "todo_md": todo_md,
-        "recent_backup": str(recent_backup) if recent_backup else None,
-        "backup_snippet": backup_snippet,
+        "recovery_notes": _extract_user_notes(context_md),
+        "files_touched": _extract_files_touched(context_md),
+        "previous_notes": _extract_previous_recovery_notes(context_md),
+        "context_md_raw": context_md,
     }
 
 
 def build_additional_context(data: dict, source: str, session_id: str) -> str:
-    """Build the additionalContext string for SessionStart injection."""
-    parts = []
-    parts.append(f"## ContextRecovery: Session Start ({format_timestamp()})")
-    parts.append(f"Session source: `{source}`")
-    parts.append(f"Session ID: `{session_id[:8]}...`")
+    """
+    Build compact additionalContext for SessionStart injection.
 
-    # Git status
+    Design: claude-mem handles semantic compression and progressive disclosure.
+    ContextRecoveryHook provides: raw facts (files) + user decision records (notes).
+
+    Claude Code's LLM handles any minor overlap between the two sources.
+    """
+    parts = [
+        f"## ContextRecovery: Session Resume ({format_timestamp()})",
+        f"_ContextRecovery: raw facts + user notes (claude-mem handles semantic layer)_",
+        "",
+    ]
+
+    # Git status — always useful, never overlapping
     git = get_git_status()
     if git["branch"]:
-        parts.append(f"Git branch: `{git['branch']}` | Changed files: {git['changed_files']}")
-
+        parts.append(f"Git: `{git['branch']}` | {git['changed_files']} changed file(s)")
     parts.append("")
 
-    # Session-specific context.md content
-    if data["context_md"]:
-        parts.append("### 📋 Previous Session Context")
-        parts.append("_Last updated before last compaction._")
-        parts.append(data["context_md"][:2000])
-        parts.append("")
+    # Previous cycle's notes (preserved across compaction cycles)
+    if data["previous_notes"]:
+        parts.extend([
+            "### 📝 Notes from Previous Cycle",
+            "_Preserved across compaction — do not discard._",
+            data["previous_notes"],
+            "",
+        ])
 
-    # Global TODO.md content
-    if data["todo_md"]:
-        parts.append("### 📌 Active TODO Items")
-        # Extract just the unchecked items
-        todo_lines = []
-        for line in data["todo_md"].splitlines():
-            line = line.strip()
-            if line.startswith("- [ ]") or line.startswith("- [x]") or line.startswith("* [ ]"):
-                todo_lines.append(line)
-            elif line.startswith("#") or (line and not line.startswith(">")):
-                if todo_lines:
-                    break  # stop at next section
-        if todo_lines:
-            parts.extend(todo_lines[:15])
-        else:
-            parts.append(data["todo_md"][:500])
-        parts.append("")
+    # User's handwritten recovery notes
+    if data["recovery_notes"]:
+        parts.extend([
+            "### 📋 Your Recovery Notes",
+            data["recovery_notes"],
+            "",
+        ])
 
-    # Recent transcript context
-    if data["backup_snippet"]:
-        parts.append("### 💬 Recent Conversation (from last backup)")
-        parts.append("_Context preserved before last compaction._")
-        parts.append("```")
-        parts.append(data["backup_snippet"][:1500])
-        parts.append("```")
-        parts.append("")
+    # Files touched (raw fact, not AI-compressed)
+    if data["files_touched"]:
+        parts.extend([
+            "### 📁 Files Recently Touched",
+            data["files_touched"],
+            "",
+        ])
 
-    # Recovery instructions
-    parts.append("### 🔄 Recovery Guidance")
-    parts.append(
-        "Review the context above. If the previous session was working on specific files or tasks, "
-        "continue from where it left off. Check git status to understand current state."
-    )
+    # Compact guidance
+    parts.extend([
+        "### 🔄 Resume Guidance",
+        "Files above are raw facts. claude-mem provides semantic understanding. "
+        "If claude-mem is active, check its memory for the full picture. "
+        "Otherwise, use the facts above to continue from where the last session left off.",
+    ])
 
     return "\n".join(parts)
 
@@ -257,16 +312,15 @@ def load_handoff(session_id: str) -> str:
 
 
 def build_clear_handoff_context(handoff_content: str, old_session_id: str) -> str:
-    """Build additionalContext from a /clear handoff."""
+    """Build compact additionalContext from a /clear handoff.
+
+    /clear is unique to ContextRecoveryHook — claude-mem doesn't handle it.
+    Include the full handoff content for continuity.
+    """
     parts = [
-        "## ContextRecovery: /clear Transition Recovery",
-        f"Session source: `clear`",
-        f"Restored from previous session: `{old_session_id[:8]}...`",
-        "",
-        "_This context was captured just before the previous session ended via /clear._",
-        "_Continue working from where the previous session left off._",
-        "",
-        "### 📋 Previous Session Handoff",
+        "## ContextRecovery: /clear Transition",
+        f"_Restored from previous session `{old_session_id[:8]}...`_",
+        "_claude-mem does not handle /clear — use this context to continue._",
         "",
     ]
 
@@ -281,10 +335,10 @@ def build_clear_handoff_context(handoff_content: str, old_session_id: str) -> st
 
     parts.extend([
         "",
-        "### 🔄 Recovery Guidance",
-        "The context above was captured from the session just before /clear. "
-        "Review what was in progress and continue from where it left off. "
-        "Check git status to understand the current project state.",
+        "### 🔄 Resume from /clear",
+        "Review the context above. The previous session captured this before /clear was issued. "
+        "Continue from where it left off. claude-mem's memory may also provide semantic context — "
+        "use both to get the full picture.",
     ])
 
     return "\n".join(parts)
@@ -353,21 +407,22 @@ def main() -> None:
         })
         sys.exit(0)
 
-    # Load context files (session-specific context.md + global TODO.md)
-    data = load_context_files(session_id)
+    # Load session context: only Recovery Notes + Files (claude-mem handles semantic layer)
+    data = load_session_context(session_id)
 
     # Log the event
     log_event("session_start", {
         "session_id": session_id,
         "source": source,
-        "has_context": bool(data["context_md"]),
-        "has_todo": bool(data["todo_md"]),
-        "recent_backup": data["recent_backup"],
+        "has_recovery_notes": bool(data["recovery_notes"]),
+        "has_files": bool(data["files_touched"]),
+        "has_previous_notes": bool(data["previous_notes"]),
     })
 
     # Inject additionalContext on resume and after compaction.
     # source values: startup (new), resume (--resume), compact (after compaction)
-    if source in ("resume", "compact", "startup") and (data["context_md"] or data["todo_md"]):
+    has_content = data["recovery_notes"] or data["files_touched"] or data["previous_notes"]
+    if source in ("resume", "compact", "startup") and has_content:
         additional = build_additional_context(data, source, session_id)
         output = {
             "hookSpecificOutput": {
