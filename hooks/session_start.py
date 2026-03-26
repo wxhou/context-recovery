@@ -5,7 +5,8 @@ Runs AFTER session starts (including resume from compaction) to:
   1. Load and inject session-specific context.md as additionalContext
   2. Load ~/.claude/TODO.md for active work items (global)
   3. Load recent transcript backup for context continuity
-  4. Log the session start event to events.jsonl
+  4. On /clear transition: restore handoff from previous session
+  5. Log the session start event to events.jsonl
 """
 import json
 import subprocess
@@ -21,6 +22,11 @@ from typing import Optional
 def session_dir(session_id: str) -> Path:
     """Return the per-session directory for this session_id."""
     return Path.home() / ".claude" / "sessions" / session_id
+
+
+def latest_dir() -> Path:
+    """Return the latest-handoff directory keyed by project."""
+    return Path.home() / ".claude" / "sessions" / "latest"
 
 
 def read_stdin() -> dict:
@@ -202,6 +208,65 @@ def build_additional_context(data: dict, source: str, session_id: str) -> str:
     return "\n".join(parts)
 
 
+def load_latest_pointer(cwd: str) -> Optional[dict]:
+    """Load the latest handoff pointer for a project."""
+    if not cwd:
+        return None
+    sanitized = cwd.replace("/", "_")
+    ptr = latest_dir() / sanitized / "latest.json"
+    if not ptr.exists():
+        return None
+    try:
+        return json.loads(ptr.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def load_handoff(session_id: str) -> str:
+    """Load the handoff.md for a given session_id."""
+    handoff_path = session_dir(session_id) / "handoff.md"
+    if not handoff_path.exists():
+        return ""
+    try:
+        return handoff_path.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+
+def build_clear_handoff_context(handoff_content: str, old_session_id: str) -> str:
+    """Build additionalContext from a /clear handoff."""
+    parts = [
+        "## ContextRecovery: /clear Transition Recovery",
+        f"Session source: `clear`",
+        f"Restored from previous session: `{old_session_id[:8]}...`",
+        "",
+        "_This context was captured just before the previous session ended via /clear._",
+        "_Continue working from where the previous session left off._",
+        "",
+        "### 📋 Previous Session Handoff",
+        "",
+    ]
+
+    # Parse and format the handoff markdown
+    lines = handoff_content.splitlines()
+    skip_header = True  # Skip the "# Context Handoff" header
+    for line in lines:
+        if skip_header and line.startswith("#"):
+            skip_header = False
+            continue
+        parts.append(line)
+
+    parts.extend([
+        "",
+        "### 🔄 Recovery Guidance",
+        "The context above was captured from the session just before /clear. "
+        "Review what was in progress and continue from where it left off. "
+        "Check git status to understand the current project state.",
+    ])
+
+    return "\n".join(parts)
+
+
 def log_event(event_type: str, data: dict) -> None:
     """Append a JSONL entry to session-specific events.jsonl (append-only)."""
     log_file = Path.home() / ".claude" / "sessions" / data.get("session_id", "unknown") / "events.jsonl"
@@ -225,10 +290,45 @@ def main() -> None:
 
     session_id = input_data.get("session_id", "unknown")
     source = input_data.get("source", "unknown")
+    cwd = input_data.get("cwd", "")
 
     # Ensure session directory exists
     s_dir = session_dir(session_id)
     ensure_dir(s_dir)
+
+    # ── /clear transition: restore handoff from previous session ────────────
+    if source == "clear":
+        ptr = load_latest_pointer(cwd)
+        if ptr:
+            old_session_id = ptr.get("session_id", "")
+            handoff_content = load_handoff(old_session_id)
+            if handoff_content:
+                clear_context = build_clear_handoff_context(handoff_content, old_session_id)
+                log_event("session_start", {
+                    "session_id": session_id,
+                    "source": source,
+                    "restored_from": old_session_id,
+                    "handoff_cwd": ptr.get("cwd", ""),
+                    "type": "clear_handoff",
+                })
+                output = {
+                    "hookSpecificOutput": {
+                        "hookEventName": "SessionStart",
+                        "additionalContext": clear_context,
+                    }
+                }
+                sys.stdout.flush()
+                sys.stderr.flush()
+                print(json.dumps(output), flush=True)
+                sys.exit(0)
+
+        # No handoff found — fall through to normal startup logging
+        log_event("session_start", {
+            "session_id": session_id,
+            "source": source,
+            "handoff_found": False,
+        })
+        sys.exit(0)
 
     # Load context files (session-specific context.md + global TODO.md)
     data = load_context_files(session_id)
@@ -243,7 +343,7 @@ def main() -> None:
     })
 
     # Inject additionalContext on resume and after compaction.
-    # source values: startup (new), resume (--resume), clear (/clear), compact (after compaction)
+    # source values: startup (new), resume (--resume), compact (after compaction)
     if source in ("resume", "compact", "startup") and (data["context_md"] or data["todo_md"]):
         additional = build_additional_context(data, source, session_id)
         output = {

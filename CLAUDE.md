@@ -9,13 +9,19 @@
 |----|------|---|-------|------|
 | #4749 | 4:43 PM | 🟣 | ContextRecoveryHook: Open Source Claude Code Context Preservation Plugin | ~365 |
 | #4747 | 4:42 PM | 🟣 | ContextRecoveryHook Plugin Created | ~293 |
+
+### Mar 26, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #4940 | 2:30 PM | 🟢 | /clear Transition: SessionEnd capture + SessionStart restore | ~200 |
 </claude-mem-context>
 
 # ContextRecoveryHook Plugin
 
 ## Purpose
 
-Four-phase context preservation: PreCompact backup → PostCompact capture → SessionStart recovery → Stop/SessionEnd summary.
+Four-phase context preservation: PreCompact backup → PostCompact capture → SessionStart recovery → Stop/SessionEnd summary. Plus /clear transition handoff.
 
 ## Architecture
 
@@ -31,15 +37,34 @@ PreCompact (before compaction) ──→ PostCompact ──→ SessionStart (on 
      └─ log → sessions/{id}/events.jsonl│
                                           │
                     Stop (response end) + SessionEnd (session terminate):
+                    ├─ /clear: extract handoff → sessions/{id}/handoff.md
+                    │                     + update sessions/latest/{project}/latest.json
                     ├─ append session summary to context.md
                     └─ log termination reason
 
                     SessionStart:
-                    ├─ load sessions/{id}/context.md
-                    ├─ load ~/.claude/TODO.md (global)
-                    ├─ load sessions/{id}/transcript_backups/ (recent)
+                    ├─ source=clear: restore from sessions/latest/{project}/latest.json
+                    ├─ source=compact/resume/startup: load context.md + TODO.md
                     └─ inject additionalContext
 ```
+
+## /clear Transition Flow
+
+```
+/clear → SessionEnd(source=clear)
+    ├─ extract transcript context (user prompts + assistant snippets + file paths)
+    ├─ write sessions/{old_session}/handoff.md
+    └─ update sessions/latest/{sanitized_cwd}/latest.json (project-scoped pointer)
+
+    ↓ new session starts
+
+SessionStart(source=clear)
+    ├─ lookup sessions/latest/{sanitized_cwd}/latest.json → old_session_id
+    ├─ load sessions/{old_session}/handoff.md
+    └─ inject as additionalContext
+```
+
+Key design: /clear generates a NEW session_id, so we use a project-scoped latest pointer to bridge the old→new session.
 
 ## Key Files
 
@@ -48,9 +73,9 @@ PreCompact (before compaction) ──→ PostCompact ──→ SessionStart (on 
 | `hooks/setup.py` | First-run: create dirs + template files |
 | `hooks/pre_compact.py` | Before compaction: backup + generate context (JSON parsing) |
 | `hooks/post_compact.py` | After compaction: save compact_summary to context.md |
-| `hooks/session_start.py` | On session start: inject saved context (handles `compact` source) |
+| `hooks/session_start.py` | On session start: inject saved context (handles `compact`, `clear`, `resume`, `startup`) |
 | `hooks/stop.py` | Session end: extract session summary into context.md |
-| `hooks/session_end.py` | Session termination: final cleanup + reason logging |
+| `hooks/session_end.py` | Session termination: /clear handoff + reason logging |
 | `hooks/hooks.json` | Hook configuration manifest |
 
 ## Maintenance
@@ -59,15 +84,27 @@ PreCompact (before compaction) ──→ PostCompact ──→ SessionStart (on 
 - Per-session isolation: `~/.claude/sessions/{session_id}/` (multi-window safe)
 - Global TODO: `~/.claude/TODO.md` (shared across all sessions)
 - Backups: `~/.claude/sessions/{session_id}/transcript_backups/`
+- /clear handoffs: `sessions/{session_id}/handoff.md` + `sessions/latest/{project}/latest.json`
 - Logging: `~/.claude/sessions/{session_id}/events.jsonl` (JSONL append-only)
 - Backup rotation: newest 10 + last 7 days (auto-cleanup)
 - First-run: Setup hook creates base dirs + global TODO.md (idempotent)
-- All hooks: `session_dir()` helper resolves `~/.claude/sessions/{session_id}/`
 - Transcript parsing: JSON (not regex) — follows Claude Code's JSONL format `{"message":{"role":"user","content":"..."}}`
+- /clear extraction: hash-based dedup, junk pattern filtering, ~15 prompts + ~10 snippets + ~20 files
 
 ## Test
 
 ```bash
+# Test PreCompact
 echo '{"session_id":"test","transcript_path":"~/.claude/test.jsonl","trigger":"auto"}' | \
   python3 hooks/pre_compact.py --backup --generate-context --verbose
+
+# Test /clear handoff (create test transcript first)
+cat > /tmp/test_transcript.jsonl << 'EOF'
+{"type":"user","message":{"role":"user","content":"Fix the auth bug"}}
+{"type":"assistant","message":{"role":"assistant","content":"I'll help fix it."}}
+EOF
+echo '{"session_id":"old-sid","reason":"clear","source":"clear","transcript_path":"/tmp/test_transcript.jsonl","cwd":"/tmp"}' | \
+  python3 hooks/session_end.py
+echo '{"session_id":"new-sid","source":"clear","cwd":"/tmp"}' | \
+  python3 hooks/session_start.py
 ```

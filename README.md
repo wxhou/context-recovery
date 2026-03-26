@@ -51,13 +51,24 @@ Then restart Claude Code.
     ├─ 加载最近 backup snippet
     └─ 注入 additionalContext → Claude 自动获得上下文
 
+/clear 过渡 (跨 session 恢复)
+    ↓ SessionEnd (source: "clear")
+    ├─ 从旧 transcript 提取 user prompts + assistant snippets + file paths
+    ├─ 写入 sessions/<old_session>/handoff.md
+    └─ 更新 sessions/latest/<project>/latest.json 指针
+
+    ↓ SessionStart (source: "clear", 新 session_id)
+    ├─ 从 latest 指针找到旧 session 的 handoff
+    └─ 注入 /clear handoff additionalContext
+
 会话结束
     ↓ Stop
     ├─ 从 transcript 提取结构化 session summary
     └─ 追加到 context.md
 
     ↓ SessionEnd
-    └─ 记录 session 终止原因 (reason)
+    ├─ /clear 时: 触发跨 session handoff 捕获
+    └─ 其他: 记录 session 终止原因 (reason)
 ```
 
 ---
@@ -74,6 +85,7 @@ Then restart Claude Code.
 | **Backup rotation** | Auto-cleanup: keep newest 10 + last 7 days |
 | **Multi-window safe** | Per-session isolation via `session_id` — no cross-project pollution |
 | **Append-only logging** | `events.jsonl` prevents concurrent write races |
+| **/clear handoff** | SessionEnd captures context → SessionStart restores after /clear |
 
 ---
 
@@ -91,9 +103,12 @@ Then restart Claude Code.
 ├── logs/
 │   └── events.jsonl           # Setup/global events (JSONL)
 └── sessions/
-    └── {session_id}/          # Per-window isolation
+    ├── latest/                 # /clear handoff pointers (keyed by project)
+    │   └── {project}/latest.json
+    └── {session_id}/           # Per-window isolation
         ├── context.md          # Auto-generated context summary
         ├── events.jsonl        # Per-window hook events (JSONL)
+        ├── handoff.md          # /clear transition handoff (captured on /clear)
         └── transcript_backups/ # Transcript backups
 ```
 
@@ -126,7 +141,8 @@ Auto-generated before each compaction per session window. **Do not edit** — it
 | Dependencies | Python stdlib only | Python + uv |
 | Context files | sessions/{id}/context.md + TODO.md | memory/*.md |
 | Multi-window | Yes (session_id isolation) | Unknown |
-| Weight | **~850 lines** | ~2000+ lines |
+| /clear coverage | ✅ | Unknown |
+| Weight | **~1570 lines** | ~2000+ lines |
 
 ---
 
