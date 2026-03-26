@@ -148,16 +148,84 @@ def rotate_backups(backup_root, max_count=10, max_age_days=7):
         pass  # Rotation is best-effort
 
 
-def extract_key_content(transcript_path: Path) -> dict:
-    """Extract meaningful content from transcript for context generation."""
-    transcript = safe_read(transcript_path, limit=50_000)
-    if not transcript:
-        return {"prompts": [], "files": []}
+# ── junk patterns ─────────────────────────────────────────────────────────────
 
-    # Parse JSONL properly — each line is a JSON object
-    # Format: {"message": {"role": "user/assistant", "content": "..."}}
-    prompts = []
-    seen_files = {}
+# Patterns that indicate junk/invalid assistant output — filter these out
+JUNK_PATTERNS = (
+    "API Error:",
+    "rate_limit",
+    "invalid_request_error",
+    "overloaded",
+    "No response requested",
+    "(no content)",
+    "[Request interrupted by user]",
+)
+
+
+def _looks_like_real_file_path(value: str) -> bool:
+    """Check if a string looks like a real absolute file path."""
+    if not value or not value.startswith("/"):
+        return False
+    if "\n" in value or "\r" in value:
+        return False
+    for token in ("&&", "||", "|", ";", "$(", "`"):
+        if token in value:
+            return False
+    return True
+
+
+def _collect_paths_recursive(obj, paths: dict) -> None:
+    """Recursively collect file paths from JSON objects."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key in ("file_path", "path") and isinstance(value, str):
+                if _looks_like_real_file_path(value):
+                    paths[value.strip()] = True
+            else:
+                _collect_paths_recursive(value, paths)
+    elif isinstance(obj, list):
+        for item in obj:
+            _collect_paths_recursive(item, paths)
+
+
+def _collect_text_from_content(content) -> str:
+    """Extract plain text from message content (string or text blocks)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                t = part.get("text", "")
+                if t:
+                    parts.append(t)
+        return "\n".join(parts)
+    return ""
+
+
+def _is_junk(text: str) -> bool:
+    """Check if text should be filtered as junk."""
+    return any(p in text for p in JUNK_PATTERNS)
+
+
+# ── transcript extraction ─────────────────────────────────────────────────────
+
+def extract_key_content(transcript_path: Path) -> dict:
+    """
+    Extract meaningful content from transcript for context generation.
+
+    Returns: {"prompts": [...], "snippets": [...], "files": [...]}
+      - prompts: last 10 user message texts (deduped by hash, trimmed to 500 chars)
+      - snippets: last 5 assistant response texts (junk-filtered, trimmed to 300 chars)
+      - files: last 20 unique file paths (from tool_use blocks + regex fallback)
+    """
+    transcript = safe_read(transcript_path, limit=80_000)
+    if not transcript:
+        return {"prompts": [], "snippets": [], "files": []}
+
+    prompts: list = []
+    snippets: list = []
+    seen_files: dict = {}
 
     for line in transcript.strip().splitlines():
         line = line.strip()
@@ -173,30 +241,61 @@ def extract_key_content(transcript_path: Path) -> dict:
             continue
 
         role = msg.get("role", "")
-        if role != "user":
-            continue
-
         content = msg.get("content", "")
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    text = block.get("text", "")
-                    if len(text) > 10:
-                        prompts.append(text[:500])
-        elif isinstance(content, str):
-            if len(content) > 10:
-                prompts.append(content[:500])
+        # tool_use blocks are siblings of content, not nested inside it
+        tool_uses: list = msg.get("tool_use", [])
 
-    # Extract file paths from full transcript text
-    file_exts = r'[\w\-\./]+\.(py|ts|tsx|js|jsx|md|json|yaml|yml|go|rs|java|cpp|c|h|toml)\b'
-    found_files = re.findall(file_exts, transcript)
-    for f in found_files:
-        if f not in seen_files:
-            seen_files[f] = True
+        if role == "user":
+            text = _collect_text_from_content(content)
+            if len(text) > 10 and not _is_junk(text):
+                prompts.append(text[:500])
+
+        elif role == "assistant":
+            # Extract assistant text response
+            if isinstance(content, list):
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "text":
+                        text = block.get("text", "").strip()
+                        if text and not _is_junk(text):
+                            snippets.append(text[:300])
+            elif isinstance(content, str) and content.strip():
+                if not _is_junk(content):
+                    snippets.append(content.strip()[:300])
+
+            # Extract file paths from tool_use blocks
+            for tool in tool_uses:
+                if isinstance(tool, dict):
+                    _collect_paths_recursive(tool.get("input", {}), seen_files)
+
+    # Hash-based dedup for prompts (keep last 10)
+    seen_hashes: set = set()
+    deduped_prompts: list = []
+    for msg_text in prompts:
+        h = hash(msg_text[:200])
+        if h not in seen_hashes:
+            seen_hashes.add(h)
+            deduped_prompts.append(msg_text)
+    prompts = deduped_prompts[-10:]
+
+    # Limit snippets to last 5 (most recent = most relevant)
+    snippets = snippets[-5:]
+
+    # Fallback: extract file paths via regex from full transcript
+    # (covers cases where tool_use blocks weren't captured)
+    if not seen_files:
+        file_exts = r'[\w\-\./]+\.(py|ts|tsx|js|jsx|md|json|yaml|yml|go|rs|java|cpp|c|h|toml)\b'
+        found_files = re.findall(file_exts, transcript)
+        for f in found_files:
+            if f not in seen_files:
+                seen_files[f] = True
+
     unique_files = list(seen_files.keys())[-20:]
 
     return {
-        "prompts": prompts[-10:],
+        "prompts": prompts,
+        "snippets": snippets,
         "files": unique_files,
     }
 
@@ -251,6 +350,14 @@ def generate_context_summary(data: dict, session_id: str, s_dir: Path) -> str:
             lines.append(f"- {escaped}")
     else:
         lines.append("_No recent prompts extracted._")
+
+    if data["snippets"]:
+        lines.append("")
+        lines.append("### Recent Assistant Responses")
+        lines.append("_Key responses from this session — what Claude did and decided._")
+        for i, s in enumerate(data["snippets"], 1):
+            trimmed = s.replace("\n", " ")[:250]
+            lines.append(f"{i}. {trimmed}")
 
     if data["files"]:
         lines.append("")
@@ -377,7 +484,7 @@ def main() -> None:
             print(f"Context summary written to: {context_path}", file=sys.stdout)
     elif args.generate_context:
         # No transcript: still generate from existing context (preserve notes)
-        data = {"prompts": [], "files": []}
+        data = {"prompts": [], "snippets": [], "files": []}
         summary = generate_context_summary(data, session_id, s_dir)
         context_path = s_dir / "context.md"
         safe_write(context_path, summary)

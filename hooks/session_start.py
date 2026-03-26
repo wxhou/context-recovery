@@ -96,10 +96,41 @@ def get_recent_backup(s_dir: Path) -> Optional[Path]:
     return newest
 
 
+JUNK_PATTERNS = (
+    "API Error:",
+    "rate_limit",
+    "invalid_request_error",
+    "overloaded",
+    "No response requested",
+    "(no content)",
+    "[Request interrupted by user]",
+)
+
+
+def _is_junk(text: str) -> bool:
+    return any(p in text for p in JUNK_PATTERNS)
+
+
+def _collect_text_from_content(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                t = part.get("text", "")
+                if t:
+                    parts.append(t)
+        return "\n".join(parts)
+    return ""
+
+
 def extract_context_from_backup(backup_path: Path, max_chars: int = 3000) -> str:
     """Extract last few exchanges from transcript backup for context continuity."""
     try:
-        content = backup_path.read_text(encoding="utf-8", limit=max_chars * 2)
+        # Read full content then slice (Python 3.9 compat — no limit param)
+        raw = backup_path.read_text(encoding="utf-8")
+        content = raw[:max_chars * 2]
         lines = content.strip().splitlines()
         # Take last 20 lines max
         recent = lines[-20:] if len(lines) > 20 else lines
@@ -110,18 +141,10 @@ def extract_context_from_backup(backup_path: Path, max_chars: int = 3000) -> str
             try:
                 obj = json.loads(line)
                 role = obj.get("message", {}).get("role", "")
-                content_text = obj.get("message", {}).get("content", "")
-                if isinstance(content_text, list):
-                    for block in content_text:
-                        if block.get("type") == "text":
-                            text = block.get("text", "")[:300]
-                            if text:
-                                prefix = "👤 " if role == "user" else "🤖 "
-                                result.append(f"{prefix}{text}")
-                elif isinstance(content_text, str):
-                    if content_text[:300]:
-                        prefix = "👤 " if role == "user" else "🤖 "
-                        result.append(f"{prefix}{content_text[:300]}")
+                content_text = _collect_text_from_content(obj.get("message", {}).get("content", ""))
+                if content_text and not _is_junk(content_text):
+                    prefix = "👤 " if role == "user" else "🤖 "
+                    result.append(f"{prefix}{content_text[:300]}")
             except Exception:
                 pass
         return "\n".join(result[-10:])  # last 10 exchanges
