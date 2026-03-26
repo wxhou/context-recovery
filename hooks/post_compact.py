@@ -63,6 +63,22 @@ def append_to_context(summary: str, s_dir: Path) -> None:
         print(f"[post_compact] WARNING: failed to update context.md: {e}", file=sys.stderr)
 
 
+def save_cycle_summary(summary: str, session_id: str, trigger: str, s_dir: Path) -> None:
+    """Append compact_summary to cycle_history.jsonl for PreCompact auto-fill."""
+    history_path = s_dir / "cycle_history.jsonl"
+    try:
+        ensure_dir(history_path.parent)
+        entry = json.dumps({
+            "timestamp": format_timestamp(),
+            "trigger": trigger,
+            "summary": summary[:5000],
+        }, ensure_ascii=False)
+        with open(history_path, "a", encoding="utf-8") as f:
+            f.write(entry + "\n")
+    except Exception as e:
+        print(f"[post_compact] WARNING: failed to save cycle history: {e}", file=sys.stderr)
+
+
 def log_event(event_type, data):
     """Append a JSONL entry to session-specific events.jsonl (append-only)."""
     log_file = Path.home() / ".claude" / "sessions" / data.get("session_id", "unknown") / "events.jsonl"
@@ -98,6 +114,7 @@ def main():
 
     if compact_summary:
         append_to_context(compact_summary, s_dir)
+        save_cycle_summary(compact_summary, session_id, trigger, s_dir)
 
     sys.exit(0)
 

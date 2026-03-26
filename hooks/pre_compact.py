@@ -327,6 +327,147 @@ def extract_recovery_notes(old_context: str) -> str:
     return result[:500]  # Limit preserved notes to 500 chars
 
 
+# ── cycle history — Recovery Notes auto-fill ─────────────────────────────────
+
+def load_last_cycle_summary(s_dir: Path) -> Optional[str]:
+    """Load the most recent compact_summary from cycle_history.jsonl."""
+    history_path = s_dir / "cycle_history.jsonl"
+    if not history_path.exists():
+        return None
+    try:
+        # Read last line only (most recent)
+        lines = history_path.read_text(encoding="utf-8").strip().splitlines()
+        if not lines:
+            return None
+        entry = json.loads(lines[-1])
+        return entry.get("summary", "")
+    except Exception:
+        return None
+
+
+# Patterns to identify actionable items in compact_summary text
+# These help us extract "what was done" and "what to do next"
+_ITEM_MARKERS = (
+    "files modified", "file modified", "files created", "file created",
+    "changes made", "implemented", "added", "fixed", "refactored",
+    "updated", "removed", "deleted", "renamed",
+)
+_FILE_PATH_RE = re.compile(
+    r'[\w\-\./]+\.(?:py|ts|tsx|js|jsx|md|json|yaml|yml|go|rs|java|cpp|c|h|toml)\b'
+)
+_DECISION_MARKERS = ("decided", "chose", "selected", "opted", "agreed", "concluded")
+_INCOMPLETE_MARKERS = ("not yet", "still need", "todo", "to do", "remaining", "pending", "next")
+
+
+def _extract_files_from_text(text: str) -> list:
+    """Extract unique file paths from text."""
+    found = {}
+    for f in _FILE_PATH_RE.findall(text):
+        if f not in found:
+            found[f] = True
+    return list(found.keys())[-10:]  # last 10
+
+
+def _is_meaningful_line(line: str) -> bool:
+    """Check if a line contains actionable content worth preserving."""
+    lower = line.lower()
+    # Skip headings, quotes, code blocks, table rows
+    if any(line.startswith(p) for p in ("#", ">", "- ", "* ", "```", "|")):
+        return False
+    # Skip very short lines
+    if len(line) < 25:
+        return False
+    return True
+
+
+def _line_has_action(line: str) -> bool:
+    """Check if line starts with an action verb or list marker."""
+    lower = line.lower().strip()
+    # List-style bullets are usually meaningful
+    if lower.startswith(("- ", "* ", "+ ")):
+        return True
+    # Lines starting with action verbs
+    for marker in _ITEM_MARKERS:
+        if lower.startswith(marker):
+            return True
+    return False
+
+
+def generate_recovery_suggestions(summary: str) -> str:
+    """
+    Parse compact_summary and produce auto-fill suggestions for Recovery Notes.
+    Produces a structured block with:
+      - What was done (file-level summary)
+      - Decisions made
+      - Suggested next steps
+    """
+    if not summary:
+        return ""
+
+    lines_out = []
+    summary_lines = summary.splitlines()
+
+    # 1. Extract files that were worked on
+    files = _extract_files_from_text(summary)
+    if files:
+        lines_out.append("**Files worked on:**")
+        for f in files:
+            lines_out.append(f"  - `{f}`")
+        lines_out.append("")
+
+    # 2. Extract lines describing changes (things done) — must start with action marker
+    done_lines = []
+    for line in summary_lines:
+        line_stripped = line.strip()
+        if _is_meaningful_line(line_stripped) and _line_has_action(line_stripped):
+            done_lines.append(line_stripped[:200])
+
+    if done_lines:
+        lines_out.append("**What was done:**")
+        for dl in done_lines[:5]:
+            lines_out.append(f"  - {dl}")
+        lines_out.append("")
+
+    # 3. Extract potential next steps / incomplete items
+    # Only include lines that START with these markers (not mid-sentence)
+    next_lines = []
+    for line in summary_lines:
+        line_stripped = line.strip()
+        lower = line_stripped.lower()
+        if not _is_meaningful_line(line_stripped):
+            continue
+        # Must start with "next", "future", or specific incomplete phrases
+        if lower.startswith("next") or lower.startswith("future"):
+            next_lines.append(line_stripped[:200])
+        elif any(lower.startswith(m) for m in ("not yet", "still need", "still pending", "todo:", "to-do:")):
+            next_lines.append(line_stripped[:200])
+
+    if next_lines:
+        lines_out.append("**Suggested next steps:**")
+        for nl in next_lines[:3]:
+            lines_out.append(f"  - {nl}")
+        lines_out.append("")
+
+    # 4. Extract decisions
+    decision_lines = []
+    for line in summary_lines:
+        line_stripped = line.strip()
+        lower = line_stripped.lower()
+        if not _is_meaningful_line(line_stripped):
+            continue
+        if any(m in lower for m in _DECISION_MARKERS):
+            decision_lines.append(line_stripped[:200])
+
+    if decision_lines:
+        lines_out.append("**Decisions made:**")
+        for dl in decision_lines[:3]:
+            lines_out.append(f"  - {dl}")
+        lines_out.append("")
+
+    result = "\n".join(lines_out).strip()
+    return result[:600]  # Cap at 600 chars
+
+
 def generate_context_summary(data: dict, session_id: str, s_dir: Path) -> str:
     """Generate a structured context summary for session-specific context.md."""
     lines = [
@@ -369,6 +510,13 @@ def generate_context_summary(data: dict, session_id: str, s_dir: Path) -> str:
     # Preserve Recovery Notes from previous cycle
     old_context = safe_read(s_dir / "context.md")
     preserved_notes = extract_recovery_notes(old_context)
+
+    # Auto-fill Recovery Notes from the last compaction summary
+    last_summary = load_last_cycle_summary(s_dir)
+    auto_notes = ""
+    if last_summary:
+        auto_notes = generate_recovery_suggestions(last_summary)
+
     if preserved_notes:
         lines.extend([
             "",
@@ -381,6 +529,19 @@ def generate_context_summary(data: dict, session_id: str, s_dir: Path) -> str:
         "",
         "## Recovery Notes",
         "",
+    ])
+
+    if auto_notes:
+        lines.extend([
+            "_**Auto-filled from last compaction** — review and edit below._",
+            "",
+            auto_notes,
+            "",
+            "---",
+            "",
+        ])
+
+    lines.extend([
         "_Add your notes here before the next session — what was in progress,",
         "_what files to revisit, what decisions were made, etc._",
         "",
