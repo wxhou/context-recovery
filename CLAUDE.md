@@ -76,7 +76,7 @@ Key design: /clear generates a NEW session_id, so we use a project-scoped latest
 | `hooks/session_start.py` | On session start: inject saved context (handles `compact`, `clear`, `resume`, `startup`) |
 | `hooks/stop.py` | Session end: extract session summary into context.md |
 | `hooks/session_end.py` | Session termination: /clear handoff + reason logging |
-| `hooks/hooks.json` | Hook configuration manifest |
+| `hooks/_safe_write.py` | Shared atomic write utility |
 
 ## Maintenance
 

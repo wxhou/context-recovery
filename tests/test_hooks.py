@@ -19,6 +19,15 @@ from unittest.mock import patch
 HOOKS_DIR = Path(__file__).parent.parent / "hooks"
 sys.path.insert(0, str(HOOKS_DIR))
 
+# Import shared utilities and hook modules
+import _safe_write
+import session_end
+import session_start
+import pre_compact
+import post_compact
+import stop
+import setup
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Fixtures
@@ -51,35 +60,31 @@ class TestAtomicWrite(unittest.TestCase):
 
     def test_atomic_write_basic(self):
         """Content written correctly and no temp files left behind."""
-        import session_end
         target = self._s_dir() / "atomic.txt"
-        session_end._atomic_write(target, "hello 世界\n")
+        _safe_write.safe_write(target, "hello 世界\n")
         self.assertEqual(target.read_text(encoding="utf-8"), "hello 世界\n")
         leftover = list(self._s_dir().glob(".tmp_*"))
         self.assertEqual(leftover, [], f"Temp files leaked: {leftover}")
 
     def test_atomic_write_overwrites(self):
         """Atomic write correctly replaces existing content."""
-        import session_end
         target = self._s_dir() / "overwrite.txt"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("old", encoding="utf-8")
-        session_end._atomic_write(target, "new")
+        _safe_write.safe_write(target, "new")
         self.assertEqual(target.read_text(), "new")
 
     def test_atomic_write_creates_parents(self):
         """Atomic write creates parent directories if missing."""
-        import session_end
         target = self._s_dir() / "a" / "b" / "c.txt"
-        session_end._atomic_write(target, "nested")
+        _safe_write.safe_write(target, "nested")
         self.assertTrue(target.exists())
         self.assertEqual(target.read_text(), "nested")
 
     def test_atomic_write_large_content(self):
         """Atomic write handles large content (1 MB+)."""
-        import session_end
         target = self._s_dir() / "large.txt"
-        session_end._atomic_write(target, "x" * (1024 * 1024))
+        _safe_write.safe_write(target, "x" * (1024 * 1024))
         self.assertEqual(len(target.read_text()), 1024 * 1024)
 
 

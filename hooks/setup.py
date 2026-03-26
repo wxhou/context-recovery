@@ -7,28 +7,11 @@ Safe to run multiple times (idempotent).
 import json
 import os
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
 
-def _atomic_write(path: Path, content: str) -> None:
-    """Write content to path atomically via temp file + rename."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_", suffix="_" + path.name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(content)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, str(path))
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
+from _safe_write import safe_write
 
 def format_timestamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -41,7 +24,7 @@ def ensure_dir(path):
 def write_if_missing(path, content):
     if not path.exists():
         try:
-            _atomic_write(path, content)
+            safe_write(path, content)
             print(f"[setup] Created: {path}", file=sys.stdout)
             return True
         except Exception as e:

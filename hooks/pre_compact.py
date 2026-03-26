@@ -13,32 +13,12 @@ import os
 import re
 import shutil
 import sys
-import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
 
-def _atomic_write(path: Path, content: str) -> None:
-    """Write content to path atomically via temp file + rename.
-
-    Creates parent dirs if needed. Cleans up temp file on failure.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_", suffix="_" + path.name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(content)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, str(path))
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
+from _safe_write import safe_write as _safe_write
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -73,12 +53,9 @@ def safe_read(path: Path, limit: int = 0) -> str:
 
 
 def safe_write(path: Path, content: str) -> None:
-    """Write content to path atomically via temp file + rename.
-
-    Uses the same atomic pattern as _atomic_write for consistency.
-    """
+    """Write content to path atomically via temp file + rename."""
     try:
-        _atomic_write(path, content)
+        _safe_write(path, content)
     except Exception as e:
         print(f"[pre_compact] WARNING: failed to write {path}: {e}", file=sys.stderr)
 
@@ -588,14 +565,14 @@ def update_todo_state() -> bool:
     content = todo_path.read_text(encoding="utf-8")
     if "<!-- last-updated:" not in content:
         marker = f"\n<!-- last-updated: {format_timestamp()} -->\n"
-        _atomic_write(todo_path, content.rstrip() + marker)
+        safe_write(todo_path, content.rstrip() + marker)
     else:
         content = re.sub(
             r"<!-- last-updated: [^>]+ -->",
             f"<!-- last-updated: {format_timestamp()} -->",
             content,
         )
-        _atomic_write(todo_path, content)
+        safe_write(todo_path, content)
     return True
 
 

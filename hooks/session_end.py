@@ -11,37 +11,17 @@ import json
 import os
 import re
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Set
 
 
+from _safe_write import safe_write
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def format_timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _atomic_write(path: Path, content: str) -> None:
-    """Write content to path atomically via temp file + rename.
-
-    Creates parent dirs if needed. Cleans up temp file on failure.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_", suffix="_" + path.name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(content)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, str(path))
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 
 def session_dir(session_id: str) -> Path:
@@ -250,7 +230,7 @@ def write_clear_handoff(
             lines.append("")
 
     try:
-        _atomic_write(handoff_path, "\n".join(lines))
+        safe_write(handoff_path, "\n".join(lines))
     except Exception as e:
         print(f"[session_end] WARNING: failed to write handoff: {e}", file=sys.stderr)
         return None
@@ -274,7 +254,7 @@ def _update_latest_pointer(session_id: str, cwd: str) -> None:
         "cwd": cwd,
     }
     try:
-        _atomic_write(
+        safe_write(
             latest_subdir / "latest.json",
             json.dumps(meta, ensure_ascii=False, indent=2),
         )
@@ -351,7 +331,7 @@ def main():
     s_dir = session_dir(session_id)
     marker = s_dir / ".session_ended"
     try:
-        _atomic_write(
+        safe_write(
             marker,
             f"ended={format_timestamp()}\nreason={reason}\n",
         )

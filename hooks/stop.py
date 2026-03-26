@@ -8,28 +8,11 @@ import json
 import os
 import re
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
 
-def _atomic_write(path: Path, content: str) -> None:
-    """Write content to path atomically via temp file + rename."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_", suffix="_" + path.name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(content)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, str(path))
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
+from _safe_write import safe_write as _safe_write
 
 def format_timestamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -62,7 +45,7 @@ def safe_read(path, limit=0):
 
 def safe_write(path, content):
     try:
-        _atomic_write(path, content)
+        _safe_write(path, content)
     except Exception as e:
         print(f"[stop] WARNING: failed to write {path}: {e}", file=sys.stderr)
 
@@ -199,7 +182,7 @@ def append_to_context(summary, s_dir):
 
         # Keep header + recovery notes, append summary
         content = content.rstrip() + "\n\n" + summary
-        _atomic_write(context_path, content)
+        safe_write(context_path, content)
     except Exception as e:
         print(f"[stop] WARNING: failed to update context.md: {e}", file=sys.stderr)
 
