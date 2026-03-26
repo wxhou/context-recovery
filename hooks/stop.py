@@ -24,7 +24,10 @@ def read_stdin() -> dict:
     raw = sys.stdin.read()
     if not raw.strip():
         return {}
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
 
 
 def safe_read(path, limit=0):
@@ -51,26 +54,52 @@ def extract_recent_work(transcript_path, session_id):
     if not transcript:
         return [], []
 
-    # Extract user prompts
-    prompts = re.findall(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)"', transcript)
-    recent = []
-    for p in prompts[-8:]:
-        p = p.encode().decode("unicode_escape", errors="replace")
-        p = p.replace("\\n", "\n").replace('\\"', '"')
-        if len(p) > 10:
-            recent.append(p[:400])
+    # Parse JSONL properly — each line is a JSON object
+    prompts = []
+    files = []
+
+    for line in transcript.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+
+        msg = entry.get("message", {})
+        if not isinstance(msg, dict):
+            continue
+
+        role = msg.get("role", "")
+        if role != "user":
+            continue
+
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "")
+                    if len(text) > 10:
+                        prompts.append(text[:400])
+        elif isinstance(content, str):
+            if len(content) > 10:
+                prompts.append(content[:400])
+
     # Deduplicate consecutive duplicates
     cleaned = []
-    for p in recent:
+    for p in prompts:
         if not cleaned or p != cleaned[-1]:
             cleaned.append(p)
 
-    # Extract file paths
-    files = re.findall(
-        r'[\w\-\./]+\.(py|ts|tsx|js|jsx|md|json|yaml|yml|go|rs|java|cpp|c|h|toml)\b',
-        transcript
-    )
-    unique_files = list(dict.fromkeys(files))[-15:]
+    # Extract file paths from full transcript
+    file_exts = r'[\w\-\./]+\.(py|ts|tsx|js|jsx|md|json|yaml|yml|go|rs|java|cpp|c|h|toml)\b'
+    found_files = re.findall(file_exts, transcript)
+    seen = {}
+    for f in found_files:
+        if f not in seen:
+            seen[f] = True
+    unique_files = list(seen.keys())[-15:]
 
     return cleaned, unique_files
 

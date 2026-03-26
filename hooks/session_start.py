@@ -27,7 +27,10 @@ def read_stdin() -> dict:
     raw = sys.stdin.read()
     if not raw.strip():
         return {}
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
 
 
 def ensure_dir(path: Path) -> None:
@@ -44,7 +47,7 @@ def safe_read(path: Path, limit: int = 0) -> str:
         return ""
 
 
-def format_timestamp() -> None:
+def format_timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 

@@ -2,7 +2,7 @@
 
 > **PreCompact backup + SessionStart recovery — the lightest Claude Code context preservation plugin.**
 
-ContextRecoveryHook prevents **context amnesia** during Claude Code's auto-compaction. Five hooks, pure stdlib Python, zero external dependencies, multi-window safe with per-session isolation.
+ContextRecoveryHook prevents **context amnesia** during Claude Code's auto-compaction. Six hooks, pure stdlib Python, zero external dependencies, multi-window safe with per-session isolation.
 
 ---
 
@@ -55,6 +55,9 @@ Then restart Claude Code.
     ↓ Stop
     ├─ 从 transcript 提取结构化 session summary
     └─ 追加到 context.md
+
+    ↓ SessionEnd
+    └─ 记录 session 终止原因 (reason)
 ```
 
 ---
@@ -118,12 +121,12 @@ Auto-generated before each compaction per session window. **Do not edit** — it
 
 | | ContextRecoveryHook | mono |
 |-|--------------------|------|
-| Scope | 5 hooks | 23 commands |
+| Scope | 6 hooks | 23 commands |
 | Learning curve | Low | High |
 | Dependencies | Python stdlib only | Python + uv |
 | Context files | sessions/{id}/context.md + TODO.md | memory/*.md |
 | Multi-window | Yes (session_id isolation) | Unknown |
-| Weight | **~750 lines** | ~2000+ lines |
+| Weight | **~850 lines** | ~2000+ lines |
 
 ---
 
@@ -137,6 +140,7 @@ rm ~/.claude/hooks/pre_compact.py
 rm ~/.claude/hooks/post_compact.py
 rm ~/.claude/hooks/session_start.py
 rm ~/.claude/hooks/stop.py
+rm ~/.claude/hooks/session_end.py
 # Restart Claude Code
 ```
 

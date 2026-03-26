@@ -24,7 +24,10 @@ def read_stdin() -> dict:
     raw = sys.stdin.read()
     if not raw.strip():
         return {}
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
 
 
 def log_event(event_type, data):

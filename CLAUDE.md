@@ -15,7 +15,7 @@
 
 ## Purpose
 
-Three-phase context preservation: PreCompact backup → PostCompact capture → SessionStart recovery → Stop summary.
+Four-phase context preservation: PreCompact backup → PostCompact capture → SessionStart recovery → Stop/SessionEnd summary.
 
 ## Architecture
 
@@ -30,14 +30,15 @@ PreCompact (before compaction) ──→ PostCompact ──→ SessionStart (on 
      ├─ update ~/.claude/TODO.md         │
      └─ log → sessions/{id}/events.jsonl│
                                           │
-                              Stop (session end):
-                              └─ append session summary to context.md
+                    Stop (response end) + SessionEnd (session terminate):
+                    ├─ append session summary to context.md
+                    └─ log termination reason
 
-                              SessionStart:
-                              ├─ load sessions/{id}/context.md
-                              ├─ load ~/.claude/TODO.md (global)
-                              ├─ load sessions/{id}/transcript_backups/ (recent)
-                              └─ inject additionalContext
+                    SessionStart:
+                    ├─ load sessions/{id}/context.md
+                    ├─ load ~/.claude/TODO.md (global)
+                    ├─ load sessions/{id}/transcript_backups/ (recent)
+                    └─ inject additionalContext
 ```
 
 ## Key Files
@@ -45,9 +46,11 @@ PreCompact (before compaction) ──→ PostCompact ──→ SessionStart (on 
 | File | Purpose |
 |------|---------|
 | `hooks/setup.py` | First-run: create dirs + template files |
-| `hooks/pre_compact.py` | Before compaction: backup + generate context |
-| `hooks/stop.py` | Session end: extract session summary into CONTEXT.md |
+| `hooks/pre_compact.py` | Before compaction: backup + generate context (JSON parsing) |
+| `hooks/post_compact.py` | After compaction: save compact_summary to context.md |
 | `hooks/session_start.py` | On session start: inject saved context (handles `compact` source) |
+| `hooks/stop.py` | Session end: extract session summary into context.md |
+| `hooks/session_end.py` | Session termination: final cleanup + reason logging |
 | `hooks/hooks.json` | Hook configuration manifest |
 
 ## Maintenance
@@ -60,6 +63,7 @@ PreCompact (before compaction) ──→ PostCompact ──→ SessionStart (on 
 - Backup rotation: newest 10 + last 7 days (auto-cleanup)
 - First-run: Setup hook creates base dirs + global TODO.md (idempotent)
 - All hooks: `session_dir()` helper resolves `~/.claude/sessions/{session_id}/`
+- Transcript parsing: JSON (not regex) — follows Claude Code's JSONL format `{"message":{"role":"user","content":"..."}}`
 
 ## Test
 

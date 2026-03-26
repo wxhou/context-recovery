@@ -9,11 +9,9 @@ Runs BEFORE context compaction to:
 """
 import argparse
 import json
-import os
 import re
 import shutil
 import sys
-import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -29,7 +27,10 @@ def read_stdin() -> dict:
     raw = sys.stdin.read()
     if not raw.strip():
         return {}
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
 
 
 def ensure_dir(path: Path) -> None:
@@ -115,24 +116,54 @@ def rotate_backups(backup_root, max_count=10, max_age_days=7):
 def extract_key_content(transcript_path: str) -> dict:
     """Extract meaningful content from transcript for context generation."""
     transcript = safe_read(Path(transcript_path), limit=50_000)
+    if not transcript:
+        return {"prompts": [], "files": []}
 
-    # Extract user prompts (look for role:user patterns in JSONL)
-    prompts = re.findall(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)"', transcript)
-    cleaned_prompts = []
-    for p in prompts[-10:]:  # last 10 messages
-        # Unescape JSON string
-        p = p.encode().decode("unicode_escape", errors="replace")
-        p = p.replace("\\n", "\n").replace('\\"', '"')
-        if len(p) > 10:
-            cleaned_prompts.append(p[:500])
+    # Parse JSONL properly — each line is a JSON object
+    # Format: {"message": {"role": "user/assistant", "content": "..."}}
+    prompts = []
+    files = []
+    seen_files = {}
 
-    # Extract file paths mentioned in tool results
-    files = re.findall(r'[\w\-\./]+\.(py|ts|tsx|js|jsx|md|json|yaml|yml|go|rs|java|cpp|c|h|toml)\b',
-                       transcript)
-    unique_files = list(dict.fromkeys(files))[-20:]  # last 20 unique files
+    for line in transcript.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+
+        msg = entry.get("message", {})
+        if not isinstance(msg, dict):
+            continue
+
+        role = msg.get("role", "")
+        if role != "user":
+            continue
+
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            # content blocks
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "")
+                    if len(text) > 10:
+                        prompts.append(text[:500])
+        elif isinstance(content, str):
+            if len(content) > 10:
+                prompts.append(content[:500])
+
+    # Extract file paths from full transcript text
+    file_exts = r'[\w\-\./]+\.(py|ts|tsx|js|jsx|md|json|yaml|yml|go|rs|java|cpp|c|h|toml)\b'
+    found_files = re.findall(file_exts, transcript)
+    for f in found_files:
+        if f not in seen_files:
+            seen_files[f] = True
+    unique_files = list(seen_files.keys())[-20:]
 
     return {
-        "prompts": cleaned_prompts,
+        "prompts": prompts[-10:],
         "files": unique_files,
     }
 
