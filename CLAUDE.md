@@ -44,8 +44,8 @@ PreCompact (before compaction) ──→ PostCompact ──→ SessionStart (on 
 
                     SessionStart:
                     ├─ source=clear: restore from sessions/latest/{project}/latest.json
-                    ├─ source=compact/resume/startup: load context.md + TODO.md
-                    └─ inject additionalContext
+                    ├─ source=compact/resume/startup: extract Recovery Notes + Files from context.md
+                    └─ inject additionalContext: Git status + Previous Cycle Notes + Your Recovery Notes + Files
 ```
 
 ## /clear Transition Flow
@@ -92,6 +92,7 @@ Key design: /clear generates a NEW session_id, so we use a project-scoped latest
 - Transcript parsing: JSON (not regex) — follows Claude Code's JSONL format `{"message":{"role":"user","content":"..."}}`
 - /clear extraction: hash-based dedup, junk pattern filtering, ~15 prompts + ~10 snippets + ~20 files
 - Recovery Notes auto-fill: extracts files + what-was-done + next steps + decisions from compact_summary
+- SessionStart injection: raw facts + user decision records (files, recovery notes, previous cycle notes, git status); claude-mem handles the semantic/compression layer —分工 not delegation
 
 ## Test
 

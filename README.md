@@ -144,7 +144,7 @@ Auto-generated before each compaction per session window. **Do not edit** — it
 | Context files | sessions/{id}/context.md + TODO.md | memory/*.md |
 | Multi-window | Yes (session_id isolation) | Unknown |
 | /clear coverage | ✅ | Unknown |
-| Weight | **~1880 lines** | ~2000+ lines |
+| Weight | **~1934 lines** | ~2000+ lines |
 
 ---
 
