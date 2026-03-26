@@ -144,7 +144,7 @@ Auto-generated before each compaction per session window. **Do not edit** — it
 | Context files | sessions/{id}/context.md + TODO.md | memory/*.md |
 | Multi-window | Yes (session_id isolation) | Unknown |
 | /clear coverage | ✅ | Unknown |
-| Weight | **~1934 lines** | ~2000+ lines |
+| Weight | **~1991 lines** | ~2000+ lines |
 
 ---
 
@@ -157,8 +157,9 @@ rm ~/.claude/hooks/setup.py
 rm ~/.claude/hooks/pre_compact.py
 rm ~/.claude/hooks/post_compact.py
 rm ~/.claude/hooks/session_start.py
-rm ~/.claude/hooks/stop.py
 rm ~/.claude/hooks/session_end.py
+rm ~/.claude/hooks/stop.py
+rm ~/.claude/hooks/_safe_write.py
 # Restart Claude Code
 ```
 

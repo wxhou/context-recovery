@@ -8,7 +8,7 @@
       "name": "context-recovery",
       "source": "./",
       "description": "PreCompact backup + SessionStart recovery — prevents context amnesia during Claude Code auto-compaction.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "author": {
         "name": "wxhou"
       },
