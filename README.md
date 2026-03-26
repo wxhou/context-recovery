@@ -83,6 +83,7 @@ Then restart Claude Code.
 | **Session recovery** | SessionStart injects saved context on resume/compact/startup |
 | **TODO tracking** | Timestamps `~/.claude/TODO.md` for work continuity (global) |
 | **Backup rotation** | Auto-cleanup: keep newest 10 + last 7 days |
+| **Auto-fill Recovery Notes** | PostCompact → cycle_history.jsonl → PreCompact auto-generates Recovery Notes from last compaction summary |
 | **Multi-window safe** | Per-session isolation via `session_id` — no cross-project pollution |
 | **Append-only logging** | `events.jsonl` prevents concurrent write races |
 | **/clear handoff** | SessionEnd captures context → SessionStart restores after /clear |
@@ -109,6 +110,7 @@ Then restart Claude Code.
         ├── context.md          # Auto-generated context summary
         ├── events.jsonl        # Per-window hook events (JSONL)
         ├── handoff.md          # /clear transition handoff (captured on /clear)
+        ├── cycle_history.jsonl # Compact summaries for auto-fill (JSONL)
         └── transcript_backups/ # Transcript backups
 ```
 
@@ -142,7 +144,7 @@ Auto-generated before each compaction per session window. **Do not edit** — it
 | Context files | sessions/{id}/context.md + TODO.md | memory/*.md |
 | Multi-window | Yes (session_id isolation) | Unknown |
 | /clear coverage | ✅ | Unknown |
-| Weight | **~1570 lines** | ~2000+ lines |
+| Weight | **~1880 lines** | ~2000+ lines |
 
 ---
 

@@ -85,11 +85,13 @@ Key design: /clear generates a NEW session_id, so we use a project-scoped latest
 - Global TODO: `~/.claude/TODO.md` (shared across all sessions)
 - Backups: `~/.claude/sessions/{session_id}/transcript_backups/`
 - /clear handoffs: `sessions/{session_id}/handoff.md` + `sessions/latest/{project}/latest.json`
+- Cycle history: `sessions/{session_id}/cycle_history.jsonl` (PostCompact → auto-fill Recovery Notes)
 - Logging: `~/.claude/sessions/{session_id}/events.jsonl` (JSONL append-only)
 - Backup rotation: newest 10 + last 7 days (auto-cleanup)
 - First-run: Setup hook creates base dirs + global TODO.md (idempotent)
 - Transcript parsing: JSON (not regex) — follows Claude Code's JSONL format `{"message":{"role":"user","content":"..."}}`
 - /clear extraction: hash-based dedup, junk pattern filtering, ~15 prompts + ~10 snippets + ~20 files
+- Recovery Notes auto-fill: extracts files + what-was-done + next steps + decisions from compact_summary
 
 ## Test
 
